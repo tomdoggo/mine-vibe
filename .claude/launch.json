@@ -4,14 +4,46 @@
     {
       "name": "ninja-battle",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "ninja-battle", "run", "dev"],
+      "runtimeArgs": [
+        "--prefix",
+        "ninja-battle",
+        "run",
+        "dev"
+      ],
       "port": 5173
     },
     {
       "name": "basketball-demo",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "basketball-demo", "run", "dev"],
+      "runtimeArgs": [
+        "--prefix",
+        "basketball-demo",
+        "run",
+        "dev"
+      ],
       "port": 5174
+    },
+    {
+      "name": "card-battle",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "card-battle",
+        "run",
+        "dev"
+      ],
+      "port": 5176
+    },
+    {
+      "name": "flip-duel",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "flip-duel",
+        "run",
+        "dev"
+      ],
+      "port": 5177
     }
   ]
 }
