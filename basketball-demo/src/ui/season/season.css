@@ -1,0 +1,106 @@
+#season {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #141414;
+  color: #e8e8f0;
+  font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", "Hiragino Sans GB", sans-serif;
+  font-size: 13px;
+}
+#season.hidden { display: none; }
+#season * { box-sizing: border-box; }
+#season button {
+  font: inherit;
+  color: #e8e8f0;
+  background: #3b3b4f;
+  border: 1px solid #6a6a80;
+  border-radius: 3px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+#season button:hover { background: #55557a; }
+#season button:disabled { opacity: 0.45; cursor: default; background: #3b3b4f; }
+#season button.primary { background: #4a5a9a; border-color: #8fa0e0; }
+#season button.small { padding: 1px 7px; font-size: 12px; }
+#season .bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: #1e1e26;
+  border-bottom: 1px solid #3a3a48;
+}
+#season .title { font-size: 18px; font-weight: bold; margin-right: 8px; }
+#season .status { color: #cfcfd8; margin-right: auto; }
+#season .status b { color: #ffd166; }
+#season .progress { color: #7ee0ff; }
+#season .tabs { display: flex; gap: 2px; padding: 8px 16px 0; background: #1a1a22; border-bottom: 1px solid #3a3a48; flex-wrap: wrap; }
+#season .tabs button { border-radius: 4px 4px 0 0; border-bottom: none; background: #24242e; }
+#season .tabs button.on { background: #3b3b4f; color: #ffd166; }
+#season .content { flex: 1; overflow: auto; padding: 14px 16px 40px; }
+#season .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+#season .card { background: #1b1b24; border: 1px solid #3a3a48; border-radius: 4px; padding: 10px 12px; }
+#season .card h3 { margin: 0 0 6px; font-size: 14px; color: #ffd166; }
+#season .muted { color: #8a8a98; }
+#season .hint { color: #8a8a98; font-size: 12px; margin: 0 0 10px; }
+#season table { border-collapse: collapse; width: 100%; }
+#season th, #season td { padding: 3px 6px; text-align: right; white-space: nowrap; border-bottom: 1px solid #262630; }
+#season th { color: #8a8a98; font-weight: normal; position: sticky; top: 0; background: #141414; }
+#season th.sort { cursor: pointer; }
+#season th.sort:hover, #season th.on { color: #ffd166; }
+#season td.l, #season th.l { text-align: left; }
+#season tr.playoff td { background: rgba(255, 209, 102, 0.06); }
+#season tr.cut td { border-bottom: 1px dashed #ffd166; }
+#season .link { color: #9ecbff; cursor: pointer; }
+#season .link:hover { color: #ffd166; text-decoration: underline; }
+#season .team-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+#season .tier { font-size: 11px; padding: 0 5px; border-radius: 3px; margin-left: 4px; }
+#season .tier.elite { background: #5a4410; color: #ffd166; }
+#season .tier.normal { background: #22344f; color: #9ecbff; }
+#season .tier.weak { background: #333; color: #aaa; }
+#season .round { margin: 12px 0 4px; color: #8a8a98; }
+#season .game { display: flex; align-items: center; gap: 8px; padding: 3px 0; border-bottom: 1px solid #22222b; }
+#season .game .teams { min-width: 280px; }
+#season .game .score { min-width: 90px; font-variant-numeric: tabular-nums; }
+#season .win { color: #ffffff; font-weight: bold; }
+#season .lose { color: #8a8a98; }
+#season .award ol { margin: 4px 0 0; padding-left: 20px; }
+#season .award li { margin: 3px 0; }
+#season .award li:first-child { color: #ffd166; font-weight: bold; }
+#season .award .rule { font-size: 11px; color: #6a6a78; }
+#season .champion { font-size: 16px; padding: 10px 12px; margin-bottom: 12px; background: #2a2410; border: 1px solid #ffd166; border-radius: 4px; }
+#season .modal-bg { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); display: flex; align-items: flex-start; justify-content: center; padding: 30px 12px; overflow: auto; z-index: 20; }
+#season .modal { background: #15151c; border: 1px solid #6a6a80; border-radius: 6px; padding: 14px 16px; width: min(980px, 100%); }
+#season .modal h2 { margin: 0 0 4px; font-size: 18px; }
+#season .modal .close { float: right; }
+#season .attrs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px 14px; margin: 10px 0; }
+#season .attr .v { float: right; font-weight: bold; }
+#season .attr .track { height: 5px; background: #2a2a36; margin-top: 2px; }
+#season .attr .fill { height: 5px; }
+#season .r90 { color: #ffd166; } #season .r80 { color: #5ea0ff; } #season .r70 { color: #7ed957; } #season .r60 { color: #cfcfd8; } #season .r50 { color: #8a8a98; }
+#season .series { margin-bottom: 8px; }
+#season .series .wins { font-size: 16px; font-weight: bold; }
+#season label { cursor: pointer; }
+@media (max-width: 700px) {
+  #season .attrs { grid-template-columns: repeat(2, 1fr); }
+  #season .game .teams { min-width: 0; flex: 1; }
+}
+#season .news { padding: 6px 4px; border-bottom: 1px solid #22222b; }
+#season .news .when { display: inline-block; min-width: 90px; color: #6a6a78; font-size: 12px; }
+#season .news.award { color: #ffd166; }
+#season .news.injury { color: #ffb4a2; }
+#season .inj { font-size: 11px; padding: 0 4px; border-radius: 3px; margin-left: 3px; }
+#season .inj.light { background: #4a3a10; color: #ffd166; }
+#season .inj.severe, #season .inj.season { background: #4a1a1a; color: #ff8a8a; }
+#season input:not([type]), #season select {
+  font: inherit;
+  color: #e8e8f0;
+  background: #24242e;
+  border: 1px solid #4a4a5a;
+  border-radius: 3px;
+  padding: 3px 6px;
+}

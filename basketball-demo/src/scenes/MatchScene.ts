@@ -1,27 +1,57 @@
 import Phaser from 'phaser';
-import { GAME_HEIGHT, GAME_WIDTH, SCENE } from '../config';
-import { TEAMS } from '../data/players';
+import { GAME_HEIGHT, GAME_WIDTH, LAYOUT, SCENE } from '../config';
+import { Timeline } from '../replay/Timeline';
 import { drawCourt } from '../sim/CourtView';
-import { Match, type MatchEvent, type TeamStats } from '../sim/Match';
+import { COURT, COURT_BOTTOM, COURT_RIGHT } from '../sim/court';
+import { Match, STEP, type MatchEvent } from '../sim/Match';
+import { randomSeed } from '../sim/rng';
+import { createMatch, resultFromMatch, type Game } from '../season/Season';
+import { seasonBridge } from '../season/bridge';
+import { PlayerCard } from '../ui/PlayerCard';
+import { ProgressBar } from '../ui/ProgressBar';
+import { StatsChart } from '../ui/StatsChart';
+import { StatsPanel } from '../ui/StatsPanel';
 import { makeButton, textStyle, type UIButton } from '../ui/text';
 import { applyLogicalView } from '../ui/view';
 
-const SPEEDS = [0, 1, 2, 4] as const;
+/** 播放速度循环：1x → 2x → 4x → 8x → 1x */
+const SPEEDS = [1, 2, 4, 8] as const;
+const DEFAULT_SPEED = 1;
+const LOG_LINES = 8;
+/** 快进（跳过全场 / 拖进度条定位）时每帧最多花的毫秒数 */
+const FF_BUDGET_MS = 25;
 
 /**
- * 比赛场景：球场 + 记分牌 + 事件解说，驱动 Match 推进。
- * 顶部 52px 是记分牌区域，下面是整片球场。
+ * 比赛场景：顶部记分牌，左侧球场 + 进度条 + 事件日志，右侧数据面板。
+ * 模拟按固定步长推进（可复现），进度条拖动 = 恢复最近的分钟快照再快算到目标时刻。
  */
 export class MatchScene extends Phaser.Scene {
   private match!: Match;
-  private speed = 1;
+  private timeline!: Timeline;
+  private speed = DEFAULT_SPEED;
+  /** 固定步长累加器 */
+  private acc = 0;
+  /** 快进目标比赛时间（秒）；Infinity = 跳到终场；null = 正常播放 */
+  private seekTarget: number | null = null;
+  /** 首次观看结束后解锁进度条 */
+  private unlocked = false;
   private scoreText!: Phaser.GameObjects.Text;
   private clockText!: Phaser.GameObjects.Text;
   private shotClockText!: Phaser.GameObjects.Text;
   private logTexts: Phaser.GameObjects.Text[] = [];
-  private speedButtons: UIButton[] = [];
+  private speedBtn!: UIButton;
+  private skipBtn!: UIButton;
   private showIntent = true;
+  private panel!: StatsPanel;
+  private card!: PlayerCard;
+  private chart!: StatsChart;
+  private bar!: ProgressBar;
   private endPanel: Phaser.GameObjects.Container | null = null;
+  /** 赛季比赛（从赛季总览进来的）；null = 友谊赛 */
+  private seasonGame: Game | null = null;
+  private reported = false;
+  /** 正在飘的提示文字（定位时一并清掉） */
+  private readonly floats = new Set<Phaser.GameObjects.Text>();
 
   constructor() {
     super(SCENE.MATCH);
@@ -29,141 +59,239 @@ export class MatchScene extends Phaser.Scene {
 
   create(): void {
     applyLogicalView(this);
-    this.speed = 1;
+    this.speed = DEFAULT_SPEED;
+    this.acc = 0;
+    this.seekTarget = null;
+    this.unlocked = false;
     this.endPanel = null;
     this.logTexts = [];
-    this.speedButtons = [];
+    this.floats.clear();
+
+    const data = this.scene.settings.data as { seed?: number; game?: Game } | undefined;
+    this.seasonGame = data?.game ?? null;
+    this.reported = false;
+    const seed = this.seasonGame?.seed ?? data?.seed ?? randomSeed();
 
     drawCourt(this);
-    this.match = new Match(this);
+    this.match = this.seasonGame ? createMatch(this.seasonGame, this) : new Match(this, seed);
     this.match.onEvent = (e) => this.handleEvent(e);
+    this.timeline = new Timeline(this.match);
     for (const p of this.match.players) p.setShowIntent(this.showIntent);
 
-    this.buildHud();
+    this.buildHud(seed);
+    this.buildLog();
+    this.bar = new ProgressBar(this, COURT.left + 8, (COURT_BOTTOM + LAYOUT.logTop) / 2, COURT_RIGHT - COURT.left - 16, COURT_RIGHT - 8, LAYOUT.logTop + 5);
+    this.bar.onSeek = (t) => this.seek(t);
+    this.panel = new StatsPanel(this, this.match);
+    this.card = new PlayerCard(this);
+    this.chart = new StatsChart(this, this.match, this.timeline);
+    this.panel.onPlayerClick = (p) => this.card.show(p);
   }
 
-  private buildHud(): void {
-    // 记分牌背景
-    this.add.rectangle(GAME_WIDTH / 2, 24, GAME_WIDTH, 48, 0x1e1e26).setDepth(1000);
-    this.add.rectangle(GAME_WIDTH / 2, 48, GAME_WIDTH, 1, 0x3a3a48).setDepth(1000);
+  private buildHud(seed: number): void {
+    const h = LAYOUT.hudHeight;
+    this.add.rectangle(GAME_WIDTH / 2, h / 2, GAME_WIDTH, h, 0x1e1e26).setDepth(1000);
+    this.add.rectangle(GAME_WIDTH / 2, h, GAME_WIDTH, 1, 0x3a3a48).setDepth(1000);
 
-    this.scoreText = this.add.text(12, 6, '', textStyle(13)).setDepth(1001);
-    this.clockText = this.add.text(12, 26, '', textStyle(9, '#cfcfd8')).setDepth(1001);
-    this.shotClockText = this.add.text(165, 26, '', textStyle(9, '#ffd166')).setDepth(1001);
+    this.scoreText = this.add.text(16, 8, '', textStyle(17)).setDepth(1001);
+    this.clockText = this.add.text(16, 34, '', textStyle(10, '#cfcfd8')).setDepth(1001);
+    // 24 秒：紧贴球场上方正中
+    this.shotClockText = this.add
+      .text((COURT.left + COURT_RIGHT) / 2, COURT.top - 3, '', textStyle(10, '#ffd166'))
+      .setOrigin(0.5, 1)
+      .setDepth(1001);
 
-    // 事件解说：最近 3 条
-    for (let i = 0; i < 3; i++) {
-      const t = this.add
-        .text(232, 5 + i * 13, '', textStyle(8, i === 2 ? '#ffffff' : '#9a9aa8'))
-        .setDepth(1001)
-        .setAlpha(i === 2 ? 1 : 0.8);
-      this.logTexts.push(t);
+    // 速度控制：一个按钮循环切换
+    this.speedBtn = makeButton(this, 700, 20, 88, 20, '', () => this.cycleSpeed(), 9);
+    this.speedBtn.container.setDepth(1002);
+    this.add.text(700 - 44, 38, '点击切换播放速度', textStyle(7, '#8a8a98')).setDepth(1001);
+    const chartBtn = makeButton(this, 804, 20, 64, 20, '统计图', () => this.chart.toggle(), 9);
+    chartBtn.container.setDepth(1002);
+    this.add.text(804, 44, `种子 ${seed}`, textStyle(7, '#6a6a78')).setOrigin(0.5).setDepth(1001);
+    if (this.seasonGame) {
+      const back = makeButton(this, 590, 20, 80, 20, '返回赛季', () => this.backToSeason(), 9);
+      back.container.setDepth(1002);
     }
-
-    // 速度控制
-    const labels = ['暂停', '1x', '2x', '4x'];
-    SPEEDS.forEach((sp, i) => {
-      const b = makeButton(this, 480 + i * 34, 14, 30, 16, labels[i], () => this.setSpeed(sp), 8);
-      b.container.setDepth(1002);
-      this.speedButtons.push(b);
-    });
+    this.skipBtn = makeButton(this, 896, 44, 104, 18, '跳过全场', () => this.startSkip(), 9);
+    this.skipBtn.container.setDepth(1002);
     const intentBtn = makeButton(
       this,
-      585,
-      36,
-      100,
-      16,
+      896,
+      20,
+      104,
+      20,
       '显示意图：开',
       () => {
         this.showIntent = !this.showIntent;
         intentBtn.setLabel(`显示意图：${this.showIntent ? '开' : '关'}`);
         for (const p of this.match.players) p.setShowIntent(this.showIntent);
       },
-      8,
+      9,
     );
     intentBtn.container.setDepth(1002);
-    this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 1, '蓝队向右进攻，红队向左进攻；场上所有球员自主决策', textStyle(6, '#9a9aa8'))
-      .setOrigin(0.5, 1)
-      .setDepth(1001);
-    this.setSpeed(1);
+    this.setSpeed(DEFAULT_SPEED);
+  }
+
+  private buildLog(): void {
+    const x = COURT.left;
+    const w = COURT_RIGHT - COURT.left;
+    const top = LAYOUT.logTop;
+    const h = LAYOUT.logBottom - top;
+    this.add.rectangle(x + w / 2, top + h / 2, w, h, 0x1b1b24, 0.96).setStrokeStyle(1, 0x3a3a48).setDepth(1000);
+    this.add.text(x + 8, top + 5, '比赛进程', textStyle(9, '#8a8a98')).setDepth(1001);
+    const lineH = (h - 22) / LOG_LINES;
+    for (let i = 0; i < LOG_LINES; i++) {
+      const t = this.add
+        .text(x + 8, top + 19 + i * lineH, '', textStyle(8, i === LOG_LINES - 1 ? '#ffffff' : '#b0b0bc'))
+        .setDepth(1001);
+      this.logTexts.push(t);
+    }
   }
 
   private setSpeed(sp: number): void {
     this.speed = sp;
-    SPEEDS.forEach((s, i) => this.speedButtons[i].setActive(s === sp));
+    this.speedBtn.setLabel(`速度 ${sp}x`);
+  }
+
+  private cycleSpeed(): void {
+    const i = SPEEDS.indexOf(this.speed as (typeof SPEEDS)[number]);
+    this.setSpeed(SPEEDS[(i + 1) % SPEEDS.length]);
+  }
+
+  /** 跳过全场：分摊到多帧快进到终场，避免卡死界面 */
+  private startSkip(): void {
+    if (this.seekTarget !== null || this.match.phase === 'finished') return;
+    this.beginFastForward(Infinity);
+  }
+
+  /** 拖动进度条定位：恢复最近的分钟快照，再快算到目标时刻 */
+  private seek(t: number): void {
+    if (!this.timeline.restoreFor(t)) return;
+    for (const f of this.floats) f.destroy();
+    this.floats.clear();
+    if (this.endPanel) {
+      this.endPanel.destroy(true);
+      this.endPanel = null;
+    }
+    this.acc = 0;
+    this.beginFastForward(t);
+  }
+
+  private beginFastForward(target: number): void {
+    this.seekTarget = target;
+    this.skipBtn.setLabel('快进中…');
+    this.skipBtn.setActive(true);
+  }
+
+  private endFastForward(): void {
+    this.seekTarget = null;
+    this.skipBtn.setLabel('跳过全场');
+    this.skipBtn.setActive(false);
   }
 
   update(_time: number, deltaMs: number): void {
-    // 单步最多 1/30 秒，避免切后台回来跳一大步
-    const dt = Math.min(deltaMs / 1000, 1 / 30) * this.speed;
-    if (dt > 0) {
-      // 高倍速时拆成小步，保证决策与碰撞稳定
-      const steps = Math.max(1, Math.ceil(dt / (1 / 60)));
-      for (let i = 0; i < steps; i++) this.match.update(dt / steps);
+    if (this.seekTarget !== null) {
+      const start = performance.now();
+      while (this.match.phase !== 'finished' && this.match.gameTime() < this.seekTarget && performance.now() - start < FF_BUDGET_MS) {
+        this.match.update(STEP);
+      }
+      if (this.match.phase === 'finished' || this.match.gameTime() >= this.seekTarget) this.endFastForward();
+      this.afterStep();
+      return;
     }
+    // 固定步长：单帧最多累计 1/30 秒（切后台回来不跳大步），高倍速就是一帧多走几步
+    this.acc += Math.min(deltaMs / 1000, 1 / 30) * this.speed;
+    while (this.acc >= STEP && this.match.phase !== 'finished') {
+      this.match.update(STEP);
+      this.acc -= STEP;
+    }
+    this.afterStep();
+  }
+
+  private afterStep(): void {
     this.refreshHud();
-    if (this.match.phase === 'finished' && !this.endPanel) this.showEndPanel();
+    this.panel.update();
+    this.bar.setProgress(this.match.gameTime());
+    this.chart.update();
+    if (this.match.phase === 'finished') {
+      this.timeline.recordFinal();
+      // 赛季比赛：第一次打完就把结果交给赛季（回看已打过的比赛时赛季会忽略）
+      if (this.seasonGame && !this.reported) {
+        this.reported = true;
+        seasonBridge.report(this.seasonGame.id, resultFromMatch(this.seasonGame, this.match));
+      }
+      if (!this.unlocked) {
+        this.unlocked = true;
+        this.bar.setLocked(false);
+      }
+      if (!this.endPanel) this.showEndPanel();
+    }
   }
 
   private refreshHud(): void {
     const m = this.match;
-    const b = m.stats.blue.pts;
-    const r = m.stats.red.pts;
-    this.scoreText.setText(`${TEAMS.blue.name} ${b}  :  ${r} ${TEAMS.red.name}`);
-    const poss = m.phase === 'play' || m.phase === 'inbound' ? `  球权：${TEAMS[m.possession].name}` : '';
-    this.clockText.setText(`${m.clockText()}${poss}`);
+    const b = m.score('blue');
+    const r = m.score('red');
+    const score = `${m.teams.blue.name} ${b}  :  ${r} ${m.teams.red.name}`;
+    if (this.scoreText.text !== score) this.scoreText.setText(score);
+    const clock = m.clockText();
+    if (this.clockText.text !== clock) this.clockText.setText(clock);
     const sc = m.phase === 'play' ? Math.ceil(m.shotClock) : 24;
-    this.shotClockText.setText(`24秒：${sc}`);
+    const scText = `24秒：${sc}`;
+    if (this.shotClockText.text !== scText) this.shotClockText.setText(scText);
     const color = sc <= 5 ? '#ff6b6b' : '#ffd166';
     if (this.shotClockText.style.color !== color) this.shotClockText.setColor(color);
-    const recent = m.log.slice(-3);
-    for (let i = 0; i < 3; i++) this.logTexts[i].setText(recent[i] ?? '');
+    const recent = m.log.slice(-LOG_LINES);
+    const offset = LOG_LINES - recent.length;
+    for (let i = 0; i < LOG_LINES; i++) {
+      const v = i < offset ? '' : recent[i - offset];
+      if (this.logTexts[i].text !== v) this.logTexts[i].setText(v);
+    }
   }
 
   private handleEvent(e: MatchEvent): void {
-    if (!e.float) return;
+    if (!e.float || this.seekTarget !== null) return;
     const t = this.add
-      .text(e.float.pos.x, e.float.pos.y - 14, e.float.text, textStyle(10, e.float.color))
+      .text(e.float.pos.x, e.float.pos.y - 14, e.float.text, textStyle(11, e.float.color))
       .setOrigin(0.5)
       .setDepth(2000)
       .setStroke('#000000', 2);
+    this.floats.add(t);
     this.tweens.add({
       targets: t,
       y: e.float.pos.y - 34,
       alpha: 0,
       duration: 1100,
       ease: 'Cubic.easeOut',
-      onComplete: () => t.destroy(),
+      onComplete: () => {
+        this.floats.delete(t);
+        t.destroy();
+      },
     });
   }
 
   private showEndPanel(): void {
     const m = this.match;
     const w = 340;
-    const h = 190;
-    const cx = GAME_WIDTH / 2;
-    const cy = GAME_HEIGHT / 2 + 20;
+    const h = 118;
+    const cx = (COURT.left + COURT_RIGHT) / 2;
+    const cy = GAME_HEIGHT / 2 - 30;
     const bg = this.add.rectangle(0, 0, w, h, 0x15151c, 0.94).setStrokeStyle(1, 0xdddddd);
     const title = this.add
-      .text(0, -h / 2 + 12, `终场  ${TEAMS.blue.name} ${m.stats.blue.pts} : ${m.stats.red.pts} ${TEAMS.red.name}`, textStyle(13))
+      .text(0, -h / 2 + 14, `终场  ${m.teams.blue.name} ${m.score('blue')} : ${m.score('red')} ${m.teams.red.name}`, textStyle(15))
       .setOrigin(0.5, 0);
-    const line = (st: TeamStats) =>
-      `得分 ${st.pts}  投篮 ${st.fgm}/${st.fga} (${pct(st.fgm, st.fga)})  三分 ${st.tpm}/${st.tpa}\n` +
-      `篮板 ${st.reb}  助攻 ${st.ast}  抢断 ${st.stl}  失误 ${st.tov}`;
-    const blue = this.add.text(-w / 2 + 14, -h / 2 + 40, `${TEAMS.blue.name}\n${line(m.stats.blue)}`, {
-      ...textStyle(8, TEAMS.blue.colorCss),
-      lineSpacing: 3,
-    });
-    const red = this.add.text(-w / 2 + 14, -h / 2 + 92, `${TEAMS.red.name}\n${line(m.stats.red)}`, {
-      ...textStyle(8, TEAMS.red.colorCss),
-      lineSpacing: 3,
-    });
-    const btn = makeButton(this, 0, h / 2 - 20, 100, 20, '再来一场', () => this.scene.restart(), 10);
-    this.endPanel = this.add.container(cx, cy, [bg, title, blue, red, btn.container]).setDepth(3000);
+    const hint = this.add
+      .text(0, -h / 2 + 42, '拖动下方进度条可回看任意时刻；点「统计图」看分钟走势', textStyle(8, '#9a9aa8'))
+      .setOrigin(0.5, 0);
+    const btn = this.seasonGame
+      ? makeButton(this, 0, h / 2 - 22, 110, 22, '返回赛季', () => this.backToSeason(), 10)
+      : makeButton(this, 0, h / 2 - 22, 110, 22, '再来一场', () => this.scene.restart({ seed: randomSeed() }), 10);
+    this.endPanel = this.add.container(cx, cy, [bg, title, hint, btn.container]).setDepth(3000);
   }
-}
 
-function pct(m: number, a: number): string {
-  return a === 0 ? '0%' : `${Math.round((m / a) * 100)}%`;
+  /** 回到赛季总览；没打完的比赛不记结果（之后可以重新观看或后台模拟，结果一样） */
+  private backToSeason(): void {
+    this.scene.stop();
+    seasonBridge.exit();
+  }
 }

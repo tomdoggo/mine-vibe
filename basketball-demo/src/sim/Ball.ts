@@ -15,10 +15,33 @@ export type BallState =
       duration: number;
       peak: number;
       willScore: boolean;
-      points: 2 | 3;
+      points: 1 | 2 | 3;
     }
-  | { kind: 'loose'; vel: Vec; grace: number }
+  | {
+      kind: 'loose';
+      vel: Vec;
+      /** 刚弹出来的一小段时间谁都拿不到（模拟弹框） */
+      grace: number;
+      /** 是投篮不中后的篮板球（拿到算篮板） */
+      rebound?: boolean;
+      /** 篮板对抗尚未判定（球还在弹框，落地瞬间再判） */
+      pending?: boolean;
+      /** 篮板对抗的赢家：claimUntil 之前只有他能拿到球 */
+      claimant?: Player;
+      claimUntil?: number;
+    }
   | { kind: 'dead' };
+
+/** 球的快照：状态里的球员引用换成下标 */
+export interface BallSnapshot {
+  pos: Vec;
+  height: number;
+  dribblePhase: number;
+  state: Record<string, unknown>;
+}
+
+/** BallState 里引用球员的字段 */
+const REF_KEYS = new Set(['holder', 'from', 'to', 'shooter', 'claimant']);
 
 /**
  * 球：位置 + 离地高度，状态决定每帧怎么走。
@@ -85,9 +108,25 @@ export class Ball {
       case 'loose': {
         s.grace = Math.max(0, s.grace - dtSec);
         this.pos = { x: this.pos.x + s.vel.x * dtSec, y: this.pos.y + s.vel.y * dtSec };
-        // 出界反弹（球场边线外一点点）
-        if (this.pos.x < COURT.left - 6 || this.pos.x > COURT_RIGHT + 6) s.vel.x *= -0.6;
-        if (this.pos.y < COURT.top - 6 || this.pos.y > COURT_BOTTOM + 6) s.vel.y *= -0.6;
+        // 出界反弹（球场边线外一点点），并把球推回界内，避免卡在场外
+        const minX = COURT.left - 4;
+        const maxX = COURT_RIGHT + 4;
+        const minY = COURT.top - 4;
+        const maxY = COURT_BOTTOM + 4;
+        if (this.pos.x < minX) {
+          this.pos.x = minX;
+          s.vel.x = Math.abs(s.vel.x) * 0.6;
+        } else if (this.pos.x > maxX) {
+          this.pos.x = maxX;
+          s.vel.x = -Math.abs(s.vel.x) * 0.6;
+        }
+        if (this.pos.y < minY) {
+          this.pos.y = minY;
+          s.vel.y = Math.abs(s.vel.y) * 0.6;
+        } else if (this.pos.y > maxY) {
+          this.pos.y = maxY;
+          s.vel.y = -Math.abs(s.vel.y) * 0.6;
+        }
         const friction = Math.exp(-dtSec * 1.6);
         s.vel = { x: s.vel.x * friction, y: s.vel.y * friction };
         // 弹跳衰减
@@ -98,11 +137,40 @@ export class Ball {
         this.height = 0;
         break;
     }
+    this.render();
+  }
+
+  private render(): void {
     this.sprite.setPosition(this.pos.x, this.pos.y - this.height);
     this.sprite.setScale(BALL_SCALE * (1 + this.height / 60));
     this.sprite.setDepth(this.pos.y + 100 + this.height);
     this.shadow.setPosition(this.pos.x, this.pos.y + 1);
     this.shadow.setAlpha(Math.max(0.1, 0.35 - this.height / 120));
     this.shadow.setDepth(this.pos.y - 1);
+  }
+
+  // ---------- 回放快照 ----------
+  snapshot(indexOf: (p: Player | null) => number): BallSnapshot {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(this.state)) {
+      if (REF_KEYS.has(k)) out[k] = indexOf(v as Player);
+      else if (v && typeof v === 'object') out[k] = { ...(v as Vec) };
+      else out[k] = v;
+    }
+    return { pos: { ...this.pos }, height: this.height, dribblePhase: this.dribblePhase, state: out };
+  }
+
+  restore(s: BallSnapshot, players: Player[]): void {
+    const st: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(s.state)) {
+      if (REF_KEYS.has(k)) st[k] = players[v as number];
+      else if (v && typeof v === 'object') st[k] = { ...(v as Vec) };
+      else st[k] = v;
+    }
+    this.state = st as unknown as BallState;
+    this.pos = { ...s.pos };
+    this.height = s.height;
+    this.dribblePhase = s.dribblePhase;
+    this.render();
   }
 }

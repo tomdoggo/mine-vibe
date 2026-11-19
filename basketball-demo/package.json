@@ -6,7 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "sim": "esbuild scripts/sim.ts --bundle --platform=node --format=esm --outfile=.sim/sim.mjs --log-level=warning && node .sim/sim.mjs",
+    "sim:sens": "esbuild scripts/sensitivity.ts --bundle --platform=node --format=esm --outfile=.sim/sens.mjs --log-level=warning && node .sim/sens.mjs",
+    "sim:replay": "esbuild scripts/replay-check.ts --bundle --platform=node --format=esm --outfile=.sim/replay.mjs --log-level=warning && node .sim/replay.mjs",
+    "db": "esbuild scripts/build-db.ts --bundle --platform=node --format=esm --outfile=.sim/db.mjs --log-level=warning && node .sim/db.mjs",
+    "sim:fatigue": "esbuild scripts/fatigue-check.ts --bundle --platform=node --format=esm --outfile=.sim/fatigue.mjs --log-level=warning && node .sim/fatigue.mjs",
+    "sim:season": "esbuild scripts/season-sim.ts --bundle --platform=node --format=esm --outfile=.sim/season.mjs --log-level=warning && node .sim/season.mjs"
   },
   "dependencies": {
     "phaser": "^3.87.0"

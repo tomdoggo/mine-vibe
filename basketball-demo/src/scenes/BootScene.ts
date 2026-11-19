@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH, SCENE } from '../config';
 import { TEAMS } from '../data/players';
+import { PLAYERS } from '../season/db';
+import { seasonBridge } from '../season/bridge';
 import { ANIM, ASSET_ROOT, CHAR_FRAME, FACING_COL, TEX, WALK_ROWS, type Facing } from '../data/sprites';
 import { textStyle } from '../ui/text';
 import { applyLogicalView, usePixelArtFilters } from '../ui/view';
@@ -28,6 +30,7 @@ export class BootScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.children.removeAll(true);
     usePixelArtFilters(this);
     for (const id of this.spriteIds()) {
       for (const f of FACINGS) {
@@ -39,10 +42,11 @@ export class BootScene extends Phaser.Scene {
         });
       }
     }
-    this.scene.start(SCENE.MATCH);
+    // 素材就绪：显示赛季总览（比赛画面由总览里的「观看」启动）
+    seasonBridge.booted();
   }
 
   private spriteIds(): number[] {
-    return Array.from(new Set(Object.values(TEAMS).flatMap((t) => t.players.map((p) => p.sprite))));
+    return Array.from(new Set([...Object.values(TEAMS).flatMap((t) => t.players.map((p) => p.sprite)), ...PLAYERS.map((p) => p.sprite)]));
   }
 }

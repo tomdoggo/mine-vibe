@@ -1,7 +1,9 @@
 import Phaser from 'phaser';
-import { GAME_HEIGHT, GAME_WIDTH, RENDER_SCALE } from './config';
+import { GAME_HEIGHT, GAME_WIDTH, RENDER_SCALE, SCENE } from './config';
 import { BootScene } from './scenes/BootScene';
 import { MatchScene } from './scenes/MatchScene';
+import { seasonBridge } from './season/bridge';
+import { SeasonView } from './ui/season/SeasonView';
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -22,6 +24,18 @@ const config: Phaser.Types.Core.GameConfig = {
 
 const game = new Phaser.Game(config);
 
+// 赛季总览（HTML）盖在画布上；观看比赛时隐藏，回来再显示
+const season = new SeasonView();
+season.hide();
+seasonBridge.booted = () => season.show();
+seasonBridge.report = (id, r) => season.report(id, r);
+seasonBridge.exit = () => season.show();
+season.onWatch = (g) => {
+  season.hide();
+  game.scene.start(SCENE.MATCH, { game: g });
+};
+
 if (import.meta.env.DEV) {
-  (window as unknown as { __game: Phaser.Game }).__game = game;
+  (window as unknown as { __game: Phaser.Game; __season: SeasonView }).__game = game;
+  (window as unknown as { __season: SeasonView }).__season = season;
 }

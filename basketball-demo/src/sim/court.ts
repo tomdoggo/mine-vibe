@@ -2,12 +2,12 @@ import type { Role, TeamId } from '../data/players';
 
 /**
  * 俯视全场。真实球场 28m × 15m，这里 1 米 = 20 像素，球场 560 × 300。
- * 画面顶部留给记分牌。
+ * 球场放在画面左侧，上方是记分牌，右侧是数据面板。
  */
 export const PX_PER_M = 20;
 export const COURT = {
-  left: 40,
-  top: 52,
+  left: 22,
+  top: 92,
   width: 560,
   height: 300,
 } as const;
@@ -78,15 +78,32 @@ export function clampToCourt(p: Vec, margin = 4): Vec {
 const OFFENSE_SPOTS: Record<Role, { dx: number; dy: number }> = {
   PG: { dx: 7.4, dy: 0.4 }, // 弧顶三分
   SG: { dx: 5.4, dy: -5.2 }, // 侧翼三分
-  SF: { dx: 4.4, dy: 4.4 }, // 另一侧 45 度中距离
+  SF: { dx: 5.2, dy: 4.8 }, // 另一侧 45 度三分
   PF: { dx: 3.4, dy: -3.0 }, // 肘区
-  C: { dx: 1.6, dy: 2.4 }, // 低位
+  C: { dx: 1.3, dy: 1.5 }, // 低位（离筐 2m，出手算篮下）
 };
 
-export function offenseSpot(team: TeamId, role: Role): Vec {
+/** 外线球员的中距离备选站位（每回合随机启用，让出手不全是三分） */
+const MID_SPOTS: Partial<Record<Role, { dx: number; dy: number }>> = {
+  PG: { dx: 5.2, dy: 0.6 },
+  SG: { dx: 4.2, dy: -3.6 },
+  SF: { dx: 3.4, dy: 3.2 },
+};
+
+/** 内线球员拉到三分线外的备选站位（按三分能力偶尔启用） */
+const THREE_SPOTS: Partial<Record<Role, { dx: number; dy: number }>> = {
+  PF: { dx: 6.2, dy: -3.8 }, // 侧翼 45 度三分
+  C: { dx: 7.0, dy: 2.4 }, // 弧顶偏一侧
+};
+
+/** 本回合的站位变体：base 常规、mid 外线站中距离、three 内线拉出三分线 */
+export type SpotVariant = 'base' | 'mid' | 'three';
+
+export function offenseSpot(team: TeamId, role: Role, variant: SpotVariant = 'base'): Vec {
   const dir = ATTACK_DIR[team];
   const hoop = attackHoop(team);
-  const s = OFFENSE_SPOTS[role];
+  const s =
+    (variant === 'mid' && MID_SPOTS[role]) || (variant === 'three' && THREE_SPOTS[role]) || OFFENSE_SPOTS[role];
   return { x: hoop.x - dir * s.dx * PX_PER_M, y: hoop.y + s.dy * PX_PER_M };
 }
 
