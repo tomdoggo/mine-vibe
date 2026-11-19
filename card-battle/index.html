@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>卡牌对战</title>
+    <style>
+      body { background: #0b2b20; color: #eef3ef; }
+      #boot-diag { display: none; margin: 16px; padding: 12px; border-radius: 8px; background: #5d1a1a; color: #fff;
+        font: 14px/1.5 sans-serif; word-break: break-all; }
+    </style>
+    <!-- 诊断：用最老的写法，任何浏览器都能跑。脚本出错或没启动时把原因显示在页面上，而不是白屏 -->
+    <script>
+      (function () {
+        var shown = false;
+        function show(msg) {
+          var box = document.getElementById('boot-diag');
+          if (!box) return;
+          box.style.display = 'block';
+          box.innerHTML += (shown ? '<hr>' : '<b>页面脚本没有正常运行</b><br>') + msg;
+          shown = true;
+        }
+        window.addEventListener('error', function (e) {
+          show('错误：' + (e.message || e) + (e.filename ? '<br>位置：' + e.filename + ':' + e.lineno : ''));
+        }, true);
+        window.addEventListener('unhandledrejection', function (e) {
+          show('错误：' + (e.reason && e.reason.message ? e.reason.message : e.reason));
+        });
+        window.addEventListener('load', function () {
+          setTimeout(function () {
+            var app = document.getElementById('app');
+            if (app && !app.innerHTML) {
+              show('游戏脚本 5 秒内没有启动。很可能是浏览器太旧，不支持 ES 模块。<br>浏览器信息：' + navigator.userAgent);
+            }
+          }, 5000);
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="boot-diag"></div>
+    <div id="app"></div>
+    <script type="module" src="/src/web/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "card-battle",
+  "private": true,
+  "type": "module",
+  "description": "集换式卡牌对战规则引擎 + 启发式 AI（原创示例卡）",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "play": "node --experimental-strip-types --no-warnings src/cli.ts",
+    "sim": "node --experimental-strip-types --no-warnings src/sim.ts",
+    "typecheck": "tsc --noEmit",
+    "artifact": "tsc --noEmit && vite build && node scripts/build-artifact.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.8.0",
+    "vite": "^6.4.6"
+  }
+}
