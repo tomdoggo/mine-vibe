@@ -116,8 +116,8 @@ export function symbolOdds(s: Session, id: SymbolId): SymbolOdds {
     out.notes.push({ doll: 'bat', text: `赔率 ×${T.batEyeMult}` });
   }
   if (id === 'candle' && has(s, 'imp')) {
-    out.bonus = T.impBonus;
-    out.notes.push({ doll: 'imp', text: `每条线 +${T.impBonus} 金币` });
+    out.mult *= T.impCandleMult;
+    out.notes.push({ doll: 'imp', text: `赔率 ×${T.impCandleMult}` });
   }
   if (id === 'dagger' && has(s, 'raven')) out.notes.push({ doll: 'raven', text: '中了免费再转一次' });
   const weights = weightsFor(s);
@@ -200,7 +200,7 @@ export interface SpinResult {
 
 /**
  * 结算一次旋转（纯逻辑，立刻出结果；动画由表现层慢慢播）。
- * 奖金计算顺序：各线实际赔率（见 symbolOdds）→ 双头犬 → 黑猫 → 宝箱怪，所有结果向下取整。
+ * 奖金计算顺序：各线实际赔率（见 symbolOdds）→ 猫头鹰 → 双头犬 → 黑猫 → 宝箱怪，所有结果向下取整。
  */
 export function spin(s: Session, bet: number, rng: Rng, free = false): SpinResult {
   if (!free) {
@@ -217,11 +217,15 @@ export function spin(s: Session, bet: number, rng: Rng, free = false): SpinResul
   let payout = 0;
   for (const w of wins) {
     const odds = symbolOdds(s, w.symbol);
-    payout += bet * odds.mult + odds.bonus;
+    payout += Math.floor(bet * odds.mult) + odds.bonus;
   }
   const count = (sym: SymbolId) => wins.filter((w) => w.symbol === sym).length;
   if (has(s, 'bat') && count('eye')) events.push({ doll: 'bat', text: `魔眼 ×${T.batEyeMult}` });
-  if (has(s, 'imp') && count('candle')) events.push({ doll: 'imp', text: `+${T.impBonus * count('candle')}` });
+  if (has(s, 'imp') && count('candle')) events.push({ doll: 'imp', text: `残烛 ×${T.impCandleMult}` });
+  if (payout >= bet * T.owlThreshold && has(s, 'owl')) {
+    payout *= T.owlMult;
+    events.push({ doll: 'owl', text: `大奖 ×${T.owlMult}` });
+  }
   if (wins.length >= 2 && has(s, 'hound')) {
     payout *= T.houndMult;
     events.push({ doll: 'hound', text: `多线 ×${T.houndMult}` });
@@ -230,7 +234,7 @@ export function spin(s: Session, bet: number, rng: Rng, free = false): SpinResul
     payout *= T.catMult;
     events.push({ doll: 'cat', text: `转运 ×${T.catMult}` });
   }
-  if (payout > 0 && bet >= T.mimicMinBet && has(s, 'mimic')) {
+  if (payout > 0 && bet >= maxBetOf(s) * T.mimicBetShare && has(s, 'mimic')) {
     payout = Math.floor(payout * T.mimicMult);
     events.push({ doll: 'mimic', text: `重注 ×${T.mimicMult}` });
   }
@@ -245,15 +249,9 @@ export function spin(s: Session, bet: number, rng: Rng, free = false): SpinResul
 
   let interest = 0;
   if (has(s, 'rat')) {
-    interest = Math.min(T.ratMax, Math.floor(s.coins / T.ratPer));
-    if (interest) {
-      s.coins += interest;
-      events.push({ doll: 'rat', text: `利息 +${interest}` });
-    }
-  }
-  if (payout >= bet * T.owlThreshold && has(s, 'owl')) {
-    s.spinsLeft += T.owlSpins;
-    events.push({ doll: 'owl', text: `转数 +${T.owlSpins}` });
+    interest = Math.max(T.ratMin, Math.floor((s.coins * T.ratPercent) / 100));
+    s.coins += interest;
+    events.push({ doll: 'rat', text: `利息 +${interest}` });
   }
   const freeSpin = has(s, 'raven') && count('dagger') > 0;
   if (freeSpin) events.push({ doll: 'raven', text: '再转一次' });

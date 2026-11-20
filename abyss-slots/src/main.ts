@@ -233,13 +233,13 @@ function showSymbol(id: SymbolId) {
   const changed = o.mult !== o.base;
   const notes = o.notes.map((n) => `<p class="note">${DOLL_BY_ID[n.doll].name}：${n.text}</p>`).join('');
   // 这些玩偶不改单个符号的赔率，而是满足条件时整体加成，也提醒一下
-  const global = (['hound', 'cat', 'mimic'] as const).filter((d) => session.dolls.includes(d))
+  const global = (['owl', 'hound', 'cat', 'mimic'] as const).filter((d) => session.dolls.includes(d))
     .map((d) => `<p>${DOLL_BY_ID[d].name}：${DOLL_BY_ID[d].desc}</p>`).join('');
   showModal(`
     <div class="detail-icon" data-sym="${id}"></div>
     <h2>${SYMBOL_BY_ID[id].name} 三连</h2>
     <div class="odds">×${o.mult}${o.bonus ? ` +${o.bonus}` : ''}${changed ? `<s>×${o.base}</s>` : ''}</div>
-    <p>奖金 = 下注 × ${o.mult}${o.bonus ? ` + ${o.bonus}` : ''}，按现在的下注 ${bet} 是 ${bet * o.mult + o.bonus} 金币</p>
+    <p>奖金 = 下注 × ${o.mult}${o.bonus ? ` + ${o.bonus}` : ''}，按现在的下注 ${bet} 是 ${Math.floor(bet * o.mult) + o.bonus} 金币</p>
     <p>每格出现概率 ${(o.chance * 100).toFixed(1)}%</p>
     ${notes}${global}
     <button class="btn" data-act="close">知道了</button>

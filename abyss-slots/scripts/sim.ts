@@ -40,6 +40,31 @@ console.log('\n== 1. 单次旋转');
   }
 }
 
+console.log('\n== 1b. 带玩偶时的单转返还率（押 10，深渊 1 层，各 30 万转）');
+{
+  const rtp = (dolls: DollId[]) => {
+    const n = 300_000 * K;
+    const rng = makeRng(99);
+    let bet = 0, back = 0;
+    const s = newSession();
+    s.dolls = dolls;
+    for (let i = 0; i < n; i++) {
+      s.coins = 1000; s.spinsLeft = 100; s.spinsDone = 0;
+      const chain = spinChain(s, 10, rng);
+      bet += 10;
+      back += chain.reduce((a, r) => a + r.payout + r.refund + r.interest, 0);
+    }
+    return back / bet;
+  };
+  const base = rtp([]);
+  console.log(`${'（无）'.padEnd(5, '　')} ${pct(base)}`);
+  for (const d of DOLLS) {
+    const r = rtp([d.id]);
+    console.log(`${d.name.padEnd(5, '　')} ${pct(r)}  (${r >= base ? '+' : ''}${((r - base) * 100).toFixed(1)}%)`);
+  }
+  console.log(`${'全部 10 个'.padEnd(5, '　')} ${pct(rtp(DOLLS.map((d) => d.id)))}`);
+}
+
 interface Stats { bust: number; up: number; median: number; mean: number; p90: number; max: number }
 
 /** dolls: 'take' = 每次都拿第一个玩偶；'skip' = 每次都跳过拿金币；only = 只在出现这个玩偶时拿，其余跳过 */
