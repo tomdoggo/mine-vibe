@@ -73,7 +73,7 @@ export class CoinPile {
   private restQuat = new Float32Array(TOTAL * 4);
 
   constructor() {
-    const geo = new THREE.CylinderGeometry(RADIUS, RADIUS, THICK, 18, 1);
+    const geo = new THREE.CylinderGeometry(RADIUS, RADIUS, THICK, 8, 1);
     const face = coinFaceTexture();
     const gold = { color: 0xffbf3a, metalness: 1, roughness: 0.28, envMapIntensity: 1.5 };
     const side = new THREE.MeshStandardMaterial({ ...gold, color: 0xd9962a });

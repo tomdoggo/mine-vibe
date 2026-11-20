@@ -5,6 +5,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { CoinPile, TRAY } from './coins.ts';
+import { Dolls } from './dolls.ts';
 import { REEL_GAP, Reels } from './reels.ts';
 import { signTexture, windowShadeTexture } from './symbols.ts';
 
@@ -20,12 +21,16 @@ const FRONT_Z = 0.3;
 export const MOUTH = new THREE.Vector3(0, 1.05, 0.5);
 export const SLOT = new THREE.Vector3(2.03, WIN_Y, 0.4);
 
+/** 像素风：整个 3D 画面只渲染这么多行像素，再用最近邻放大到屏幕 */
+const PIXEL_ROWS = 400;
+
 export class Stage {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
   readonly reels: Reels;
   readonly coins = new CoinPile();
+  readonly dolls = new Dolls();
 
   private composer: EffectComposer;
   private bloom: UnrealBloomPass;
@@ -43,8 +48,7 @@ export class Stage {
 
   constructor(host: HTMLElement, onReelStop: (col: number) => void) {
     this.host = host;
-    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
     host.appendChild(renderer.domElement);
@@ -62,6 +66,7 @@ export class Stage {
     this.reels.group.position.set(0, WIN_Y, 0);
     scene.add(this.reels.group);
     scene.add(this.coins.mesh);
+    scene.add(this.dolls.group);
 
     const iron = new THREE.MeshStandardMaterial({ color: 0x1c151b, metalness: 0.85, roughness: 0.5 });
     const ironDark = new THREE.MeshStandardMaterial({ color: 0x0c090c, metalness: 0.6, roughness: 0.7 });
@@ -222,7 +227,7 @@ export class Stage {
   private resize() {
     const w = this.host.clientWidth, h = this.host.clientHeight;
     if (!w || !h) return;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(PIXEL_ROWS / h);
     this.renderer.setSize(w, h);
     this.composer.setPixelRatio(this.renderer.getPixelRatio());
     this.composer.setSize(w, h);
@@ -231,7 +236,7 @@ export class Stage {
     // 竖屏为主：保证机器的宽度永远塞得进屏幕，屏幕越窄相机拉得越远
     const target = new THREE.Vector3(0, 2.75, 1.2);
     // 底部约 170px 被操作面板盖住，算高度时要把这部分刨掉（矮屏幕 / 横屏时由高度决定距离）
-    const halfW = 2.7, halfH = 4.3 / Math.max(0.5, (h - 170) / h);
+    const halfW = 3.1, halfH = 4.3 / Math.max(0.5, (h - 170) / h);
     const tanV = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
     const dist = Math.max(halfW / (tanV * cam.aspect), halfH / tanV);
     const dir = new THREE.Vector3(0, 0.3, 1).normalize();
@@ -259,6 +264,7 @@ export class Stage {
     const t = this.time;
     this.reels.update(dt);
     this.coins.update(dt);
+    this.dolls.update(dt);
 
     for (const c of this.candles) {
       const f = 0.8 + 0.2 * Math.sin(t * 11 + c.seed) * Math.sin(t * 7.3 + c.seed * 2) + 0.08 * Math.sin(t * 31 + c.seed);

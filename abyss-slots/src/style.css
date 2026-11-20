@@ -234,3 +234,86 @@ input[type='range']::-moz-range-thumb {
 .pay td:first-child { width: 44px; }
 .pay td:last-child { text-align: right; color: var(--gold); font-weight: 800; font-variant-numeric: tabular-nums; }
 .pay canvas { width: 38px; height: 38px; display: block; }
+
+/* ---------- 玩偶触发提示 ---------- */
+.toasts {
+  position: absolute;
+  left: 0; right: 0; top: 40%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 4px;
+  border: 2px solid var(--gold-dim);
+  background: #0c080bee;
+  color: var(--gold);
+  font-size: 14px;
+  font-weight: 800;
+  animation: toast 1.6s ease-out forwards;
+}
+.toast canvas { width: 24px; height: 24px; }
+@keyframes toast {
+  0% { opacity: 0; transform: translateY(10px); }
+  12% { opacity: 1; transform: translateY(0); }
+  75% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-14px); }
+}
+
+/* ---------- 礼物商店 ---------- */
+.icon-btn.gift { width: auto; padding: 0 10px; font-size: 13px; color: var(--gold); border-color: var(--gold-dim); }
+.shop { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 0; text-align: left; }
+.doll {
+  display: grid;
+  grid-template-columns: 40px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border: 2px solid #2a1d22;
+  background: #120b10;
+}
+.doll canvas { width: 40px; height: 40px; }
+.doll .name { font-size: 15px; font-weight: 800; color: var(--text); }
+.doll .desc { font-size: 12px; line-height: 1.35; color: #a89f86; }
+.doll .buy {
+  min-width: 62px;
+  height: 36px;
+  border: 2px solid var(--gold-dim);
+  background: #2a1d22;
+  color: var(--gold);
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.doll .buy:disabled { border-color: #2a1d22; color: #5a5148; }
+.doll.owned { border-color: var(--gold-dim); }
+.doll.owned .buy { border-color: transparent; background: none; color: #7ad17a; }
+
+/* ---------- 像素风：全部直角、硬边、不抗锯齿 ---------- */
+* { border-radius: 0 !important; }
+canvas { image-rendering: pixelated; }
+html, body { font-family: 'Courier New', 'PingFang SC', 'Microsoft YaHei', monospace; }
+.stat, .icon-btn, .bet-btn, .card { border-width: 2px; }
+.coin-ico { background: var(--gold); box-shadow: inset -3px -3px 0 #8a5a08, inset 3px 3px 0 #fff3b0; }
+.spin-btn {
+  border: 3px solid #fff3d8;
+  background: #c2161a;
+  box-shadow: inset 0 -6px 0 #7a0010, inset 0 4px 0 #ff5a4a, 0 4px 0 #000;
+  text-shadow: 2px 2px 0 #4a0008;
+}
+.bet-btn, .card .btn, .doll .buy { box-shadow: inset 0 -3px 0 #0006, 0 3px 0 #000; }
+.card { background: #150e13; box-shadow: 0 6px 0 #000, 0 0 0 2px #000; }
+.card .btn { background: #c2161a; border: 2px solid #fff3d8; }
+.banner, .banner.big { text-shadow: 3px 3px 0 #7a0010, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000; }
+input[type='range']::-webkit-slider-runnable-track { background: var(--gold-dim); }
+input[type='range']::-moz-range-track { background: var(--gold-dim); }
+input[type='range']::-webkit-slider-thumb { background: var(--gold); box-shadow: inset -4px -4px 0 #8a5a08, inset 4px 4px 0 #fff3b0, 0 0 0 2px #000; }
+input[type='range']::-moz-range-thumb { background: var(--gold); box-shadow: inset -4px -4px 0 #8a5a08, inset 4px 4px 0 #fff3b0, 0 0 0 2px #000; }
+input[type='range']::-webkit-slider-thumb { border-radius: 0; }
+input[type='range']::-moz-range-thumb { border-radius: 0; }
+.shop { max-height: 58dvh; overflow-y: auto; }

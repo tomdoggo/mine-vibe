@@ -4,6 +4,8 @@ export const CONFIG = {
   maxSpins: 100,
   minBet: 1,
   maxBet: 10,
+  /** 左右两边各能摆几个玩偶 */
+  dollSlotsPerSide: 5,
 } as const;
 
 export type SymbolId = 'candle' | 'dagger' | 'eye' | 'skull' | 'coin' | 'seven';
@@ -27,5 +29,52 @@ export const SYMBOLS: readonly SymbolDef[] = [
   { id: 'seven', name: '血七', weight: 4, mult: 100 },
 ];
 
-/** 赔率达到这个倍数算“大奖”，触发金币雨和震屏 */
+/** 奖金达到下注的这么多倍算“大奖”，触发金币雨和震屏 */
 export const BIG_WIN_MULT = 15;
+
+/* ---------------- 玩偶（礼物） ---------------- */
+
+export type DollId =
+  | 'imp' | 'raven' | 'ghost' | 'bat' | 'skeleton'
+  | 'rat' | 'hound' | 'cat' | 'owl' | 'mimic';
+
+export interface DollDef {
+  id: DollId;
+  name: string;
+  price: number;
+  /** 给玩家看的效果说明（具体数值在下面的 DOLL_TUNING 里） */
+  desc: string;
+}
+
+/** 玩偶效果用到的数值 */
+export const DOLL_TUNING = {
+  impBonus: 2,
+  ghostRefundChance: 0.25,
+  batEyeMult: 2,
+  skeletonSkullWeight: 6,
+  skeletonCoinWeight: 4,
+  ratPer: 50,
+  ratMax: 5,
+  houndMult: 2,
+  catStreak: 3,
+  catMult: 3,
+  owlThreshold: 10,
+  owlSpins: 2,
+  mimicMinBet: 5,
+  mimicMult: 1.5,
+} as const;
+
+const T = DOLL_TUNING;
+
+export const DOLLS: readonly DollDef[] = [
+  { id: 'imp', name: '烛灵', price: 12, desc: `每条残烛三连额外 +${T.impBonus} 金币` },
+  { id: 'ghost', name: '幽灵', price: 15, desc: `没中奖时 ${T.ghostRefundChance * 100}% 概率退还下注` },
+  { id: 'rat', name: '吞金鼠', price: 20, desc: `每转结束，每持有 ${T.ratPer} 金币 +1（最多 +${T.ratMax}）` },
+  { id: 'raven', name: '渡鸦', price: 25, desc: '中了匕首三连，立即免费再转一次' },
+  { id: 'bat', name: '魔眼蝠', price: 30, desc: `魔眼三连的赔率 ×${T.batEyeMult}` },
+  { id: 'cat', name: '黑猫', price: 30, desc: `连续 ${T.catStreak} 转没中后，下一次中奖奖金 ×${T.catMult}` },
+  { id: 'skeleton', name: '骷髅兵', price: 35, desc: '骷髅和冥币出现得更频繁' },
+  { id: 'hound', name: '双头犬', price: 40, desc: `同时中 2 条线以上，奖金 ×${T.houndMult}` },
+  { id: 'owl', name: '猫头鹰', price: 45, desc: `奖金达到下注 ${T.owlThreshold} 倍时，剩余转数 +${T.owlSpins}` },
+  { id: 'mimic', name: '宝箱怪', price: 50, desc: `下注 ≥${T.mimicMinBet} 时，奖金 ×${T.mimicMult}` },
+];

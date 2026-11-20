@@ -1,14 +1,14 @@
 import * as THREE from 'three';
 import type { SymbolId } from '../game/config.ts';
 
-/** 所有图案都用 canvas 现画（不依赖图片资源和 emoji 字体），风格统一成“黑底 + 发光” */
+/** 所有图案都用 canvas 现画（不依赖图片资源和 emoji 字体），再缩成低分辨率的像素贴图 */
 const S = 256;
 
 type Painter = (g: CanvasRenderingContext2D) => void;
 
-function glow(g: CanvasRenderingContext2D, color: string, blur = 22) {
-  g.shadowColor = color;
-  g.shadowBlur = blur;
+/** 像素风下不要柔光：缩小后只会糊成一团脏色。保留这个函数是为了以后想切回柔光时只改一处 */
+function glow(g: CanvasRenderingContext2D, _color: string, _blur = 22) {
+  g.shadowBlur = 0;
 }
 
 const PAINT: Record<SymbolId, Painter> = {
@@ -252,34 +252,58 @@ function makeCanvas(w = S, h = S) {
   return [c, c.getContext('2d')!] as const;
 }
 
-function toTexture(c: HTMLCanvasElement) {
+/**
+ * 像素化：把高清画布缩到 w×h，再把颜色压成少数几档，得到硬边的像素画。
+ * 图案本身仍然用矢量路径画，这样改图案不用一个个像素去点。
+ */
+export function pixelate(src: HTMLCanvasElement, w: number, h: number, levels = 5): HTMLCanvasElement {
+  const [c, g] = makeCanvas(w, h);
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(src, 0, 0, w, h);
+  const img = g.getImageData(0, 0, w, h);
+  const d = img.data;
+  const q = 255 / (levels - 1);
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = Math.round(d[i] / q) * q;
+    d[i + 1] = Math.round(d[i + 1] / q) * q;
+    d[i + 2] = Math.round(d[i + 2] / q) * q;
+    d[i + 3] = d[i + 3] > 110 ? 255 : 0;
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
+function toTexture(c: HTMLCanvasElement, pixel = true) {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
+  if (pixel) {
+    t.magFilter = t.minFilter = THREE.NearestFilter;
+    t.generateMipmaps = false;
+  }
   return t;
 }
 
-/** 单个符号的画布（DOM 的赔率表也复用它） */
+/** 符号贴图的边长（像素） */
+const SYMBOL_PX = 32;
+
+/** 单个符号的像素画布（DOM 的赔率表也复用它） */
 export function symbolCanvas(id: SymbolId, withBg = true): HTMLCanvasElement {
   const [c, g] = makeCanvas();
   if (withBg) {
-    const bg = g.createLinearGradient(0, 0, 0, S);
-    bg.addColorStop(0, '#120d12');
-    bg.addColorStop(0.5, '#1d151b');
-    bg.addColorStop(1, '#120d12');
-    g.fillStyle = bg;
+    g.fillStyle = '#17111a';
     g.fillRect(0, 0, S, S);
-    g.fillStyle = 'rgba(0,0,0,.6)';
-    g.fillRect(0, 0, S, 3);
-    g.fillRect(0, S - 3, S, 3);
+    g.fillStyle = '#0a0709';
+    g.fillRect(0, 0, S, 8);
+    g.fillRect(0, S - 8, S, 8);
   }
   g.save();
   g.translate(S / 2, S / 2);
-  g.scale(0.8, 0.8);
+  g.scale(0.82, 0.82);
   g.translate(-S / 2, -S / 2);
   PAINT[id](g);
   g.restore();
-  return c;
+  return pixelate(c, SYMBOL_PX, SYMBOL_PX, 6);
 }
 
 export function symbolTextures(): Record<SymbolId, THREE.Texture> {
@@ -307,7 +331,7 @@ export function coinFaceTexture(): THREE.Texture {
   }
   g.closePath();
   g.fill();
-  return toTexture(c);
+  return toTexture(pixelate(c, 16, 16, 5));
 }
 
 /** 机器顶上的招牌 */
@@ -315,7 +339,7 @@ export function signTexture(): THREE.Texture {
   const [c, g] = makeCanvas(1024, 192);
   g.fillStyle = '#0b0709';
   g.fillRect(0, 0, 1024, 192);
-  g.font = '900 128px Georgia, "Times New Roman", serif';
+  g.font = '900 132px "Courier New", monospace';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
   glow(g, '#ff2a1a', 40);
@@ -325,8 +349,7 @@ export function signTexture(): THREE.Texture {
   grad.addColorStop(1, '#c2161a');
   g.fillStyle = grad;
   g.fillText('A B Y S S', 512, 104);
-  g.fillText('A B Y S S', 512, 104);
-  return toTexture(c);
+  return toTexture(pixelate(c, 128, 24, 6));
 }
 
 /** 盖在滚轮窗口上的上下暗角，假装滚筒的曲面阴影 */
@@ -340,5 +363,5 @@ export function windowShadeTexture(): THREE.Texture {
   grad.addColorStop(1, 'rgba(0,0,0,.8)');
   g.fillStyle = grad;
   g.fillRect(0, 0, 8, 256);
-  return toTexture(c);
+  return toTexture(c, false);
 }
