@@ -5,6 +5,7 @@
   --ink: #050308;
   --panel: rgba(14, 9, 14, 0.82);
   --text: #e9dfc4;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -25,7 +26,8 @@ html, body {
 /* 竖屏游戏：手机上铺满，电脑上居中显示成一条竖屏 */
 #app {
   position: relative;
-  height: 100dvh;
+  /* 用 100% 而不是 100dvh：嵌在别的页面（比如 claude.ai）里时要留出系统栏的安全区 */
+  height: 100%;
   max-width: calc(100dvh * 0.62);
   margin: 0 auto;
   background: var(--ink);

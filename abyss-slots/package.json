@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "artifact": "tsc --noEmit && vite build && node scripts/build-artifact.mjs",
     "sim": "node --experimental-strip-types --no-warnings scripts/sim.ts"
   },
   "dependencies": {

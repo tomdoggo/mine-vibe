@@ -1,14 +1,16 @@
 /** 全部音效用 WebAudio 现场合成，不需要音频文件 */
+import { load, save } from './storage.ts';
+
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
-let muted = localStorage.getItem('abyss-slots:muted') === '1';
+let muted = load('abyss-slots:muted') === '1';
 let lastCoin = 0;
 
 export const isMuted = () => muted;
 
 export function setMuted(m: boolean) {
   muted = m;
-  localStorage.setItem('abyss-slots:muted', m ? '1' : '0');
+  save('abyss-slots:muted', m ? '1' : '0');
   if (master) master.gain.value = m ? 0 : 0.5;
 }
 

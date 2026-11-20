@@ -5,6 +5,7 @@ import { makeRng, randomSeed } from './game/rng.ts';
 import { MOUTH, SLOT, Stage } from './render/scene.ts';
 import { symbolCanvas } from './render/symbols.ts';
 import { isMuted, setMuted, sfx, unlock } from './audio.ts';
+import { load, save } from './storage.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = {
@@ -130,8 +131,8 @@ async function finish() {
   while (coins.busy) await wait(0.2);
   await wait(0.5);
   const final = session.coins;
-  const best = Math.max(final, Number(localStorage.getItem(BEST_KEY) ?? 0));
-  localStorage.setItem(BEST_KEY, String(best));
+  const best = Math.max(final, Number(load(BEST_KEY) ?? 0));
+  save(BEST_KEY, String(best));
   const bust = final < CONFIG.minBet;
   const profit = final - CONFIG.startCoins;
   if (bust) sfx.lose();
