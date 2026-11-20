@@ -44,6 +44,17 @@
         "dev"
       ],
       "port": 5177
+    },
+    {
+      "name": "abyss-slots",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "abyss-slots",
+        "run",
+        "dev"
+      ],
+      "port": 5178
     }
   ]
 }

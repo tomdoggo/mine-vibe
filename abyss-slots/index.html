@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#050308" />
+    <title>深渊老虎机</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="stage"></div>
+
+      <header class="hud">
+        <div class="stat coins"><i class="coin-ico"></i><b id="coins">0</b></div>
+        <div class="stat spins">剩余 <b id="spins">100</b> 转</div>
+        <button class="icon-btn" id="btn-info" aria-label="赔率表">?</button>
+        <button class="icon-btn" id="btn-mute" aria-label="静音">♪</button>
+      </header>
+
+      <div class="banner" id="banner"></div>
+
+      <footer class="panel">
+        <div class="bet-row">
+          <button class="bet-btn" id="bet-minus" aria-label="减注">−</button>
+          <div class="bet-mid">
+            <div class="bet-label">下注 <b id="bet">1</b></div>
+            <input id="bet-range" type="range" min="1" max="10" step="1" value="1" aria-label="下注金额" />
+          </div>
+          <button class="bet-btn" id="bet-plus" aria-label="加注">+</button>
+          <button class="bet-btn max" id="bet-max">MAX</button>
+        </div>
+        <button class="spin-btn" id="spin">旋 转</button>
+      </footer>
+
+      <div class="modal" id="modal" hidden></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
