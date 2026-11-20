@@ -4,6 +4,8 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
+import type { DollId, SymbolId } from '../game/config.ts';
 import { CoinPile, TRAY } from './coins.ts';
 import { Dolls } from './dolls.ts';
 import { REEL_GAP, Reels } from './reels.ts';
@@ -21,8 +23,15 @@ const FRONT_Z = 0.3;
 export const MOUTH = new THREE.Vector3(0, 1.05, 0.5);
 export const SLOT = new THREE.Vector3(2.03, WIN_Y, 0.4);
 
-/** 像素风：整个 3D 画面只渲染这么多行像素，再用最近邻放大到屏幕 */
+/**
+ * 像素风：机器和场景只渲染这么多行像素，再用最近邻放大到屏幕。
+ * 金币例外——它们在放大后的画面上按屏幕原生分辨率再画一遍（靠低清那一遍的深度图做遮挡），
+ * 所以金币是高清的，其余是像素块。
+ */
 const PIXEL_ROWS = 400;
+const COIN_LAYER = 1;
+
+export type Pick = { kind: 'doll'; id: DollId } | { kind: 'symbol'; id: SymbolId };
 
 export class Stage {
   readonly renderer: THREE.WebGLRenderer;
@@ -34,6 +43,11 @@ export class Stage {
 
   private composer: EffectComposer;
   private bloom: UnrealBloomPass;
+  private depthTarget: THREE.WebGLRenderTarget;
+  private blit: FullScreenQuad;
+  private insets = { top: 0, bottom: 170 };
+  private bloodLight!: THREE.PointLight;
+  private abyss = 1;
   private candles: { light: THREE.PointLight; flame: THREE.Mesh; seed: number }[] = [];
   private mouthGlow: THREE.MeshBasicMaterial;
   private mouthLight: THREE.PointLight;
@@ -48,7 +62,7 @@ export class Stage {
 
   constructor(host: HTMLElement, onReelStop: (col: number) => void) {
     this.host = host;
-    const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
     host.appendChild(renderer.domElement);
@@ -65,6 +79,7 @@ export class Stage {
     this.reels = new Reels(onReelStop);
     this.reels.group.position.set(0, WIN_Y, 0);
     scene.add(this.reels.group);
+    this.coins.mesh.layers.set(COIN_LAYER);
     scene.add(this.coins.mesh);
     scene.add(this.dolls.group);
 
@@ -173,6 +188,7 @@ export class Stage {
     const blood = new THREE.PointLight(0xff1a2a, 18, 14, 1.6);
     blood.position.set(4.5, 2.5, 3);
     scene.add(blood);
+    this.bloodLight = blood;
 
     // 机顶两支蜡烛
     const wax = new THREE.MeshStandardMaterial({ color: 0xd8cdb0, roughness: 0.7, emissive: 0x3a1c08 });
@@ -219,6 +235,25 @@ export class Stage {
     this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.55, 0.6, 0.9);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
+    // 不直接上屏：先留在低清缓冲里，下面再用最近邻放大
+    this.composer.renderToScreen = false;
+    for (const rt of [this.composer.renderTarget1, this.composer.renderTarget2]) {
+      rt.texture.magFilter = rt.texture.minFilter = THREE.NearestFilter;
+    }
+    this.depthTarget = new THREE.WebGLRenderTarget(4, 4, {
+      depthTexture: new THREE.DepthTexture(4, 4), minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
+    });
+    this.blit = new FullScreenQuad(new THREE.ShaderMaterial({
+      uniforms: { tColor: { value: null }, tDepth: { value: null } },
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+      // 颜色原样贴上去，同时把低清那一遍的深度写进深度缓冲，后面画金币时才会被机器 / 币盘正确挡住
+      fragmentShader: `uniform sampler2D tColor; uniform sampler2D tDepth; varying vec2 vUv;
+        void main() { gl_FragColor = texture2D(tColor, vUv); gl_FragDepth = texture2D(tDepth, vUv).r; }`,
+      depthFunc: THREE.AlwaysDepth,
+      toneMapped: false,
+    }));
+    // 金币单独一层，灯光要两层都照
+    scene.traverse((o) => { if ((o as THREE.Light).isLight) o.layers.enableAll(); });
 
     new ResizeObserver(() => this.resize()).observe(host);
     this.resize();
@@ -227,25 +262,55 @@ export class Stage {
   private resize() {
     const w = this.host.clientWidth, h = this.host.clientHeight;
     if (!w || !h) return;
-    this.renderer.setPixelRatio(PIXEL_ROWS / h);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(w, h);
-    this.composer.setPixelRatio(this.renderer.getPixelRatio());
-    this.composer.setSize(w, h);
+    const lowW = Math.max(1, Math.round((w / h) * PIXEL_ROWS));
+    this.composer.setPixelRatio(1);
+    this.composer.setSize(lowW, PIXEL_ROWS);
+    this.depthTarget.setSize(lowW, PIXEL_ROWS);
     const cam = this.camera;
     cam.aspect = w / h;
     // 竖屏为主：保证机器的宽度永远塞得进屏幕，屏幕越窄相机拉得越远
     const target = new THREE.Vector3(0, 2.75, 1.2);
-    // 底部约 170px 被操作面板盖住，算高度时要把这部分刨掉（矮屏幕 / 横屏时由高度决定距离）
-    const halfW = 3.1, halfH = 4.3 / Math.max(0.5, (h - 170) / h);
+    // 顶部状态栏和底部操作面板会盖住画面，机器必须完整落在两者之间（矮屏幕 / 横屏时由高度决定距离）
+    const { top, bottom } = this.insets;
+    const halfW = 3.1, halfH = 4.45 / Math.max(0.4, (h - top - bottom) / h);
     const tanV = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
     const dist = Math.max(halfW / (tanV * cam.aspect), halfH / tanV);
     const dir = new THREE.Vector3(0, 0.3, 1).normalize();
     this.camBase.copy(target).addScaledVector(dir, dist);
     cam.position.copy(this.camBase);
     cam.lookAt(target);
-    // 把画面整体往上挪一点，给操作面板让位
-    cam.setViewOffset(w, h, 0, 62, w, h);
+    // 把画面中心挪到两条界面之间的正中
+    cam.setViewOffset(w, h, 0, (bottom - top) / 2, w, h);
     cam.updateProjectionMatrix();
+  }
+
+  /** 顶部 / 底部被界面盖住多少像素，镜头据此避让 */
+  setInsets(top: number, bottom: number) {
+    if (top === this.insets.top && bottom === this.insets.bottom) return;
+    this.insets = { top, bottom };
+    this.resize();
+  }
+
+  /** 深渊越深，红光越重 */
+  setAbyss(level: number) {
+    this.abyss = level;
+    this.bloodLight.intensity = 18 + (level - 1) * 5;
+  }
+
+  /** 屏幕上这个点点中了什么（玩偶优先，其次是盘面上的符号） */
+  pick(clientX: number, clientY: number): Pick | null {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+    const ray = new THREE.Raycaster();
+    this.camera.layers.set(0);
+    this.camera.updateMatrixWorld();
+    ray.setFromCamera(ndc, this.camera);
+    const doll = this.dolls.pick(ray);
+    if (doll) return { kind: 'doll', id: doll };
+    const sym = this.reels.pick(ray);
+    return sym ? { kind: 'symbol', id: sym } : null;
   }
 
   /** 震屏 + 机器闪光（大奖用） */
@@ -272,7 +337,7 @@ export class Stage {
       c.flame.scale.set(1, 1.9 * (0.9 + 0.2 * f), 1);
     }
     this.gem.rotation.y = t * 0.8;
-    (this.gem.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.8 + Math.sin(t * 2) * 0.5 + this.flash * 4;
+    (this.gem.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.6 + this.abyss * 0.25 + Math.sin(t * 2) * 0.5 + this.flash * 4;
 
     this.flash = Math.max(0, this.flash - dt * 1.6);
     this.mouthGlow.color.setRGB(2.6 * this.flash, 1.1 * this.flash, 0.2 * this.flash);
@@ -295,6 +360,28 @@ export class Stage {
       this.camBase.y + Math.sin(t * 47 + 1) * s,
       this.camBase.z,
     );
+    const r = this.renderer, cam = this.camera;
+    // 1) 低清：场景（不含金币）的深度
+    cam.layers.set(0);
+    r.setRenderTarget(this.depthTarget);
+    r.render(this.scene, cam);
+    // 2) 低清：场景颜色 + 泛光
     this.composer.render();
+    // 3) 上屏：最近邻放大，同时写入深度
+    r.setRenderTarget(null);
+    r.clear();
+    const u = (this.blit.material as THREE.ShaderMaterial).uniforms;
+    u.tColor.value = this.composer.readBuffer.texture;
+    u.tDepth.value = this.depthTarget.depthTexture;
+    this.blit.render(r);
+    // 4) 原生分辨率：只画金币
+    const bg = this.scene.background;
+    this.scene.background = null;
+    cam.layers.set(COIN_LAYER);
+    r.autoClear = false;
+    r.render(this.scene, cam);
+    r.autoClear = true;
+    this.scene.background = bg;
+    cam.layers.set(0);
   }
 }

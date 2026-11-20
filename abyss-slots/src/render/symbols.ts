@@ -331,7 +331,7 @@ export function coinFaceTexture(): THREE.Texture {
   }
   g.closePath();
   g.fill();
-  return toTexture(pixelate(c, 16, 16, 5));
+  return toTexture(c, false);
 }
 
 /** 机器顶上的招牌 */

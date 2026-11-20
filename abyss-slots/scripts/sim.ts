@@ -1,11 +1,14 @@
 /**
  * 数值模拟：npm run sim -- [局数倍率，默认 1]
  * 1. 单次旋转：返还率（RTP）、中奖率、各符号贡献
- * 2. 整局 100 转：不同下注策略的破产率 / 中位数 / 平均值（不买玩偶 / 买玩偶）
- * 3. 单个玩偶的价值：开局白送这一个玩偶，对最终金币的影响
+ * 2. 整局 100 转：不同下注策略的破产率 / 中位数 / 平均值（全跳过 / 全拿玩偶）
+ * 3. 单个玩偶的价值：只拿这一个玩偶、其余全跳过时的结果
  */
 import { CONFIG, DOLLS, SYMBOLS, type DollId } from '../src/game/config.ts';
-import { buyDoll, clampBet, evaluate, isOver, newSession, rollGrid, spinChain, type Session } from '../src/game/slot.ts';
+import {
+  clampBet, evaluate, isOver, maxBetOf, newSession, offerDue, rollGrid, rollOffer, skipOffer, spinChain, takeDoll,
+  type Session,
+} from '../src/game/slot.ts';
 import { makeRng } from '../src/game/rng.ts';
 
 const K = Number(process.argv[2] ?? 1);
@@ -39,16 +42,22 @@ console.log('\n== 1. 单次旋转');
 
 interface Stats { bust: number; up: number; median: number; mean: number; p90: number; max: number }
 
-function play(n: number, pick: (s: Session) => number, opts: { shop?: boolean; gift?: DollId } = {}): Stats {
+/** dolls: 'take' = 每次都拿第一个玩偶；'skip' = 每次都跳过拿金币；only = 只在出现这个玩偶时拿，其余跳过 */
+function play(n: number, pick: (s: Session) => number, opts: { dolls: 'take' | 'skip'; only?: DollId }): Stats {
   const finals: number[] = [];
   let bust = 0, up = 0;
   for (let i = 0; i < n; i++) {
     const rng = makeRng(i * 7919 + 13);
     const s = newSession();
-    if (opts.gift) s.dolls.push(opts.gift);
     while (!isOver(s)) {
-      // 买玩偶的策略：从便宜的开始，买完手里还剩 20 金币以上就买
-      if (opts.shop) for (const d of DOLLS) if (s.coins - d.price >= 20) buyDoll(s, d.id);
+      if (offerDue(s)) {
+        const offer = rollOffer(s, rng);
+        if (offer) {
+          const want = opts.only ? offer.find((id) => id === opts.only) : opts.dolls === 'take' ? offer[0] : undefined;
+          if (want) takeDoll(s, want);
+          else skipOffer(s);
+        }
+      }
       spinChain(s, clampBet(s, pick(s)), rng);
     }
     finals.push(s.coins);
@@ -64,29 +73,29 @@ function play(n: number, pick: (s: Session) => number, opts: { shop?: boolean; g
 
 const strategies: [string, (s: Session) => number][] = [
   ['每次押 1', () => 1],
-  ['每次押 3', () => 3],
+  ['每次押 10', () => 10],
   ['押一成身家', (s) => Math.ceil(s.coins * 0.1)],
   ['押三成身家', (s) => Math.ceil(s.coins * 0.3)],
-  ['每次押满', () => CONFIG.maxBet],
+  ['每次押到上限', (s) => maxBetOf(s)],
 ];
 
-for (const shop of [false, true]) {
-  console.log(`\n== 2${shop ? 'b' : 'a'}. 整局（${CONFIG.startCoins} 金币开局，${CONFIG.maxSpins} 转，${shop ? '买得起就买玩偶' : '不买玩偶'}）`);
-  console.log('策略            破产率    赚到钱   中位数   平均值    90分位    最高');
+for (const dolls of ['skip', 'take'] as const) {
+  console.log(`\n== 2${dolls === 'take' ? 'b' : 'a'}. 整局（${CONFIG.startCoins} 金币开局，${CONFIG.maxSpins} 转，${dolls === 'take' ? '每次都拿玩偶' : '每次都跳过拿金币'}）`);
+  console.log('策略            破产率    赚到钱   中位数       平均值    90分位      最高');
   for (const [name, pick] of strategies) {
-    const r = play(20_000 * K, pick, { shop });
-    console.log(`${name.padEnd(8, '　')} ${pct(r.bust)} ${pct(r.up)} ${pad(r.median, 8)} ${pad(r.mean.toFixed(1), 8)} ${pad(r.p90, 9)} ${pad(r.max, 7)}`);
+    const r = play(20_000 * K, pick, { dolls });
+    console.log(`${name.padEnd(8, '　')} ${pct(r.bust)} ${pct(r.up)} ${pad(r.median, 8)} ${pad(r.mean.toFixed(0), 12)} ${pad(r.p90, 9)} ${pad(r.max, 9)}`);
   }
 }
 
-console.log('\n== 3. 单个玩偶的价值（开局白送，押一成身家，对比不带玩偶）');
+console.log('\n== 3. 单个玩偶的价值（押一成身家；只拿这一个玩偶，其余全跳过；对比全跳过）');
 {
   const pick = strategies[2][1];
-  const base = play(20_000 * K, pick);
-  console.log('玩偶      价格   中位数   平均值   平均值增量');
-  console.log(`${'（无）'.padEnd(5, '　')} ${pad('-', 5)} ${pad(base.median, 8)} ${pad(base.mean.toFixed(1), 8)}`);
+  const base = play(20_000 * K, pick, { dolls: 'skip' });
+  console.log('玩偶        中位数   破产率');
+  console.log(`${'（全跳过）'.padEnd(5, '　')} ${pad(base.median, 8)} ${pct(base.bust)}`);
   for (const d of DOLLS) {
-    const r = play(20_000 * K, pick, { gift: d.id });
-    console.log(`${d.name.padEnd(5, '　')} ${pad(d.price, 5)} ${pad(r.median, 8)} ${pad(r.mean.toFixed(1), 8)} ${pad((r.mean - base.mean >= 0 ? '+' : '') + (r.mean - base.mean).toFixed(1), 10)}`);
+    const r = play(20_000 * K, pick, { dolls: 'skip', only: d.id });
+    console.log(`${d.name.padEnd(5, '　')} ${pad(r.median, 8)} ${pct(r.bust)}`);
   }
 }

@@ -17,7 +17,9 @@ const easeOutBack = (t: number, s = 1.7) => 1 + (s + 1) * (t - 1) ** 3 + s * (t 
 const randomSymbol = () => SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)].id;
 
 interface Segment {
+  mesh: THREE.Mesh;
   mat: THREE.MeshBasicMaterial;
+  sym: SymbolId;
   /** 高亮强度：0 = 压暗，1 = 正常，>1 = 中奖闪烁 */
   level: number;
 }
@@ -37,14 +39,15 @@ class Reel {
     this.onStop = onStop;
     const geo = new THREE.PlaneGeometry(CELL, CELL);
     for (let i = 0; i < SEGMENTS; i++) {
-      const mat = new THREE.MeshBasicMaterial({ map: tex[randomSymbol()] });
+      const sym = randomSymbol();
+      const mat = new THREE.MeshBasicMaterial({ map: tex[sym] });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.z = REEL_RADIUS;
       const pivot = new THREE.Group();
       pivot.rotation.x = i * STEP;
       pivot.add(mesh);
       this.group.add(pivot);
-      this.segs.push({ mat, level: 1 });
+      this.segs.push({ mesh, mat, sym, level: 1 });
     }
   }
 
@@ -57,6 +60,11 @@ class Reel {
     return this.segs[mod(this.center + row - 1, SEGMENTS)];
   }
 
+  private paintSeg(seg: Segment, sym: SymbolId) {
+    seg.sym = sym;
+    seg.mat.map = this.tex[sym];
+  }
+
   /** 转到指定结果（从上到下 3 个符号） */
   spin(result: SymbolId[], turns: number, dur: number): Promise<void> {
     // 多转半圈：目标面此刻正好在背面，换贴图不会被看见
@@ -64,10 +72,10 @@ class Reel {
     const target = mod(this.center - steps, SEGMENTS);
     for (let i = 0; i < SEGMENTS; i++) {
       const d = Math.min(mod(i - this.center, SEGMENTS), mod(this.center - i, SEGMENTS));
-      if (d >= 3) this.segs[i].mat.map = this.tex[randomSymbol()];
+      if (d >= 3) this.paintSeg(this.segs[i], randomSymbol());
     }
     result.forEach((sym, row) => {
-      this.segs[mod(target + row - 1, SEGMENTS)].mat.map = this.tex[sym];
+      this.paintSeg(this.segs[mod(target + row - 1, SEGMENTS)], sym);
     });
     const from = -this.center * STEP;
     this.center = target;
@@ -144,6 +152,20 @@ export class Reels {
       this.group.add(bar);
       this.lines.push(bar);
     }
+  }
+
+  /** 射线点中了盘面上的哪个符号（转动中不算） */
+  pick(ray: THREE.Raycaster): SymbolId | null {
+    let best: SymbolId | null = null, bestDist = Infinity;
+    for (const reel of this.reels) {
+      if (reel.spinning) return null;
+      for (let row = 0; row < 3; row++) {
+        const seg = reel.seg(row);
+        const hit = ray.intersectObject(seg.mesh)[0];
+        if (hit && hit.distance < bestDist) { bestDist = hit.distance; best = seg.sym; }
+      }
+    }
+    return best;
   }
 
   /** 三个滚筒依次停下 */

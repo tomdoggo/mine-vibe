@@ -1,7 +1,8 @@
 import './style.css';
 import { BIG_WIN_MULT, CONFIG, DOLLS, SYMBOLS, type DollId, type SymbolId } from './game/config.ts';
 import {
-  buyDoll, canBuy, clampBet, DOLL_BY_ID, isOver, MAX_DOLLS, newSession, spin,
+  abyssLevel, clampBet, DOLL_BY_ID, isOver, MAX_DOLLS, maxBetOf, newSession, offerDue, rollOffer, SELL_PRICE,
+  sellDoll, skipOffer, spin, SYMBOL_BY_ID, symbolOdds, takeDoll,
   type Session, type SpinResult,
 } from './game/slot.ts';
 import { makeRng, randomSeed } from './game/rng.ts';
@@ -13,7 +14,8 @@ import { load, save } from './storage.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = {
-  coins: $('coins'), coinsBox: $('coins').parentElement!, spins: $('spins'), bet: $('bet'),
+  coins: $('coins'), coinsBox: $('coins').parentElement!, spins: $('spins'), abyss: $('abyss'), bet: $('bet'),
+  hud: document.querySelector<HTMLElement>('.hud')!, panel: document.querySelector<HTMLElement>('.panel')!,
   range: $<HTMLInputElement>('bet-range'), spin: $<HTMLButtonElement>('spin'),
   banner: $('banner'), toasts: $('toasts'), modal: $('modal'), mute: $('btn-mute'),
 };
@@ -36,7 +38,7 @@ const coins = stage.coins;
 coins.onLand = (value) => {
   if (!value) return;
   shown += value;
-  el.coins.textContent = String(shown);
+  el.coins.textContent = fmt(shown);
   el.coinsBox.classList.remove('bump');
   void el.coinsBox.offsetWidth;
   el.coinsBox.classList.add('bump');
@@ -46,12 +48,29 @@ coins.onInsert = () => sfx.insert();
 
 /* ---------------- 界面 ---------------- */
 
+/** 顶栏位置有限，金币太多时缩写成“万 / 亿” */
+function fmt(n: number) {
+  if (n >= 1e8) return `${Math.floor(n / 1e6) / 100}亿`;
+  if (n >= 1e5) return `${Math.floor(n / 1e3) / 10}万`;
+  return String(n);
+}
+
+/** 告诉 3D 镜头顶栏和底部面板各占了多高，机器要完整露在两者之间 */
+function syncInsets() {
+  const app = document.getElementById('app')!.getBoundingClientRect();
+  // 两条界面的边缘都是渐变淡出的，淡出那一段不算遮挡
+  const top = el.hud.getBoundingClientRect().bottom - app.top - 12;
+  const bottom = app.bottom - el.panel.getBoundingClientRect().top - 20;
+  stage.setInsets(Math.max(0, Math.round(top)), Math.max(0, Math.round(bottom)));
+}
+
 function refresh() {
   bet = clampBet(session, bet);
-  el.coins.textContent = String(shown);
+  el.coins.textContent = fmt(shown);
   el.spins.textContent = String(session.spinsLeft);
+  el.abyss.textContent = String(abyssLevel(session));
   el.bet.textContent = String(bet);
-  el.range.max = String(Math.max(1, Math.min(CONFIG.maxBet, session.coins)));
+  el.range.max = String(Math.max(1, Math.min(maxBetOf(session), session.coins)));
   el.range.value = String(bet);
   el.spin.disabled = spinning || isOver(session);
 }
@@ -71,13 +90,21 @@ function banner(html: string, big: boolean) {
   el.banner.className = `banner show${big ? ' big' : ''}`;
 }
 
-/** 玩偶触发提示：头像 + 一句话，自己飘走 */
-function toast(doll: DollId, text: string) {
+/** 飘字提示：玩偶触发时带头像，其他消息传 null */
+function toast(doll: DollId | null, text: string) {
   const row = document.createElement('div');
   row.className = 'toast';
-  row.append(dollCanvas(doll), `${DOLL_BY_ID[doll].name} ${text}`);
+  if (doll) row.append(dollCanvas(doll), `${DOLL_BY_ID[doll].name} ${text}`);
+  else row.append(text);
   el.toasts.appendChild(row);
   row.addEventListener('animationend', () => row.remove());
+}
+
+/** 白拿的小额金币（跳过选择、卖玩偶）：从出币口吐出来 */
+function drip(amount: number) {
+  if (amount <= 0) return;
+  coins.fountain(MOUTH, split(amount, amount), 0.2, 0.8);
+  stage.glowMouth(0.5);
 }
 
 /** 把 total 枚金币分给 n 个模型（大奖时一枚模型代表好几枚） */
@@ -132,10 +159,7 @@ async function present(result: SpinResult) {
     for (let t = 0; t < dur; t += 0.1) coins.later(t, () => stage.glowMouth(big ? 1 : 0.7));
     await wait(big ? 0.9 : 0.35);
   } else {
-    if (gain > 0) {
-      coins.fountain(MOUTH, split(gain, gain), 0.2, 0.8);
-      stage.glowMouth(0.5);
-    }
+    drip(gain);
     await wait(result.events.length ? 0.3 : 0.12);
   }
 }
@@ -145,6 +169,7 @@ async function doSpin() {
   unlock();
   spinning = true;
   const before = session.coins;
+  const level = abyssLevel(session);
   let result = spin(session, bet, rng);
   // 下注：金币从币盘飞进投币口
   spend(result.bet, before, SLOT);
@@ -156,43 +181,76 @@ async function doSpin() {
     await present(result);
   }
   spinning = false;
+  if (abyssLevel(session) > level) {
+    stage.setAbyss(abyssLevel(session));
+    stage.punch(0.5, 0.6);
+    toast(null, `深渊 ${abyssLevel(session)} 层 · 下注上限 ${maxBetOf(session)}`);
+  }
   refresh();
   if (isOver(session)) void finish();
+  else offerDolls();
 }
 
-/* ---------------- 礼物商店 ---------------- */
+/* ---------------- 玩偶：二选一 / 出售 ---------------- */
 
-function showShop() {
-  const rows = DOLLS.map((d) => {
-    const owned = session.dolls.includes(d.id);
-    const btn = owned
-      ? '<button class="buy" disabled>已摆放</button>'
-      : `<button class="buy" data-buy="${d.id}" ${canBuy(session, d.id) ? '' : 'disabled'}>${d.price}</button>`;
-    return `<div class="doll${owned ? ' owned' : ''}"><span data-doll="${d.id}"></span>
-      <div><div class="name">${d.name}</div><div class="desc">${d.desc}</div></div>${btn}</div>`;
-  }).join('');
+/** 到点了就弹出玩偶选择（开局一次，之后每 offerEvery 转一次） */
+function offerDolls() {
+  if (!offerDue(session)) return;
+  const offer = rollOffer(session, rng);
+  if (!offer) return;
+  const cards = offer.map((id) => `<button class="pick" data-take="${id}"><span data-doll="${id}"></span>
+    <span class="name">${DOLL_BY_ID[id].name}</span><span class="desc">${DOLL_BY_ID[id].desc}</span></button>`).join('');
   showModal(`
-    <h2>礼物</h2>
-    <p>用金币买玩偶摆在币盘两侧，效果整局生效。<br>已摆放 ${session.dolls.length} / ${MAX_DOLLS} · 持有金币 ${session.coins}</p>
-    <div class="shop">${rows}</div>
-    <button class="btn" data-act="close">返回</button>
+    <h2>挑一个玩偶</h2>
+    <p>摆在币盘两侧，效果一直生效（${session.dolls.length} / ${MAX_DOLLS}）</p>
+    <div class="offer">${cards}</div>
+    <button class="btn ghost" data-skip="1">跳过，拿 ${CONFIG.dollPrice} 金币</button>
   `);
+  mountDollIcons();
+}
+
+function mountDollIcons() {
   el.modal.querySelectorAll<HTMLElement>('[data-doll]').forEach((box) => {
     box.replaceWith(dollCanvas(box.dataset.doll as DollId));
   });
 }
 
-function buy(id: DollId) {
-  if (spinning) return;
-  const before = session.coins;
-  const slot = session.dolls.length;
-  if (!buyDoll(session, id)) return;
-  unlock();
-  sfx.win(false);
-  spend(DOLL_BY_ID[id].price, before, stage.dolls.slotPos(slot));
-  stage.dolls.set(session.dolls);
-  refresh();
-  showShop();
+function showDoll(id: DollId) {
+  const d = DOLL_BY_ID[id];
+  showModal(`
+    <div class="detail-icon"><span data-doll="${id}"></span></div>
+    <h2>${d.name}</h2>
+    <p>${d.desc}</p>
+    <button class="btn ghost" data-sell="${id}">出售，拿 ${SELL_PRICE} 金币</button>
+    <button class="btn" data-act="close">留着</button>
+  `);
+  mountDollIcons();
+}
+
+/** 点盘面上的符号：显示算上玩偶之后的实际赔率 */
+function showSymbol(id: SymbolId) {
+  const o = symbolOdds(session, id);
+  const changed = o.mult !== o.base;
+  const notes = o.notes.map((n) => `<p class="note">${DOLL_BY_ID[n.doll].name}：${n.text}</p>`).join('');
+  // 这些玩偶不改单个符号的赔率，而是满足条件时整体加成，也提醒一下
+  const global = (['hound', 'cat', 'mimic'] as const).filter((d) => session.dolls.includes(d))
+    .map((d) => `<p>${DOLL_BY_ID[d].name}：${DOLL_BY_ID[d].desc}</p>`).join('');
+  showModal(`
+    <div class="detail-icon" data-sym="${id}"></div>
+    <h2>${SYMBOL_BY_ID[id].name} 三连</h2>
+    <div class="odds">×${o.mult}${o.bonus ? ` +${o.bonus}` : ''}${changed ? `<s>×${o.base}</s>` : ''}</div>
+    <p>奖金 = 下注 × ${o.mult}${o.bonus ? ` + ${o.bonus}` : ''}，按现在的下注 ${bet} 是 ${bet * o.mult + o.bonus} 金币</p>
+    <p>每格出现概率 ${(o.chance * 100).toFixed(1)}%</p>
+    ${notes}${global}
+    <button class="btn" data-act="close">知道了</button>
+  `);
+  mountSymbolIcons();
+}
+
+function mountSymbolIcons() {
+  el.modal.querySelectorAll<HTMLElement>('[data-sym]').forEach((box) => {
+    box.appendChild(symbolCanvas(box.dataset.sym as SymbolId, false));
+  });
 }
 
 /* ---------------- 结算 ---------------- */
@@ -212,8 +270,8 @@ async function finish() {
   showModal(`
     <h2>${title}</h2>
     <p>${bust ? '金币输光了' : '转数用完，最终金币'}</p>
-    <div class="final">${final}</div>
-    <p>本局最高 ${session.peak} · 玩偶 ${session.dolls.length} 个 · 历史最佳 ${best}</p>
+    <div class="final">${fmt(final)}</div>
+    <p>深渊 ${abyssLevel(session)} 层 · 玩偶 ${session.dolls.length} 个<br>本局最高 ${fmt(session.peak)} · 历史最佳 ${fmt(best)}</p>
     <button class="btn" data-act="restart">再来一局</button>
   `);
 }
@@ -224,19 +282,20 @@ function showModal(html: string) {
 }
 
 function showPaytable() {
-  const rows = [...SYMBOLS].reverse().map((s) => `<tr><td data-sym="${s.id}"></td><td>${s.name} ×3</td><td>×${s.mult}</td></tr>`).join('');
+  const rows = [...SYMBOLS].reverse().map((sym) => {
+    const o = symbolOdds(session, sym.id);
+    return `<tr><td data-sym="${sym.id}"></td><td>${sym.name} ×3</td><td>×${o.mult}${o.bonus ? ` +${o.bonus}` : ''}</td></tr>`;
+  }).join('');
   showModal(`
     <h2>玩法</h2>
-    <p>${CONFIG.startCoins} 枚金币开局，每转自选押 ${CONFIG.minBet}–${CONFIG.maxBet} 枚。<br>
-    横、竖、斜共 8 条线，任意一条三连即中奖，<br>奖金 = 下注 × 赔率，多条线叠加。<br>
-    赚到的金币可以在“礼物”里买玩偶。<br>
-    目标：${CONFIG.maxSpins} 转之内赢到尽可能多的金币。</p>
+    <p>${CONFIG.startCoins} 枚金币开局，${CONFIG.maxSpins} 转之内赢到尽可能多的金币。<br>
+    横、竖、斜共 8 条线，三连即中奖，奖金 = 下注 × 赔率。<br>
+    每转 ${CONFIG.abyssEvery} 次深渊加深一层，下注上限翻倍。<br>
+    开局和每转 ${CONFIG.offerEvery} 次可以二选一拿一个玩偶，<br>点玩偶可以出售，点盘面上的符号可以看实际赔率。</p>
     <table class="pay">${rows}</table>
     <button class="btn" data-act="close">知道了</button>
   `);
-  el.modal.querySelectorAll<HTMLElement>('[data-sym]').forEach((td) => {
-    td.appendChild(symbolCanvas(td.dataset.sym as SymbolId, false));
-  });
+  mountSymbolIcons();
 }
 
 function restart() {
@@ -247,9 +306,11 @@ function restart() {
   coins.reset();
   stage.reels.clearHighlight();
   stage.dolls.set(session.dolls);
+  stage.setAbyss(1);
   // 开局的金币也从出币口吐出来
   coins.fountain(MOUTH, split(session.coins, session.coins), 0.5, 0.8);
   refresh();
+  offerDolls();
 }
 
 /* ---------------- 事件 ---------------- */
@@ -257,15 +318,9 @@ function restart() {
 el.spin.addEventListener('click', () => void doSpin());
 $('bet-minus').addEventListener('click', () => setBet(bet - 1));
 $('bet-plus').addEventListener('click', () => setBet(bet + 1));
-$('bet-max').addEventListener('click', () => setBet(CONFIG.maxBet));
+$('bet-max').addEventListener('click', () => setBet(maxBetOf(session)));
 el.range.addEventListener('input', () => setBet(Number(el.range.value)));
 $('btn-info').addEventListener('click', () => { unlock(); sfx.click(); showPaytable(); });
-$('btn-shop').addEventListener('click', () => {
-  if (spinning || isOver(session)) return;
-  unlock();
-  sfx.click();
-  showShop();
-});
 el.mute.addEventListener('click', () => {
   unlock();
   setMuted(!isMuted());
@@ -273,14 +328,48 @@ el.mute.addEventListener('click', () => {
 });
 el.mute.classList.toggle('off', isMuted());
 el.modal.addEventListener('click', (e) => {
-  const data = (e.target as HTMLElement).dataset;
-  if (data.buy) return buy(data.buy as DollId);
-  if (!data.act) return;
+  const data = (e.target as HTMLElement).closest<HTMLElement>('button')?.dataset;
+  if (!data) return;
   unlock();
-  sfx.click();
+  if (data.take) {
+    if (!takeDoll(session, data.take as DollId)) return;
+    sfx.win(false);
+    stage.dolls.set(session.dolls);
+  } else if (data.skip) {
+    sfx.click();
+    drip(skipOffer(session));
+  } else if (data.sell) {
+    sfx.click();
+    drip(sellDoll(session, data.sell as DollId));
+    stage.dolls.set(session.dolls);
+  } else if (data.act) {
+    sfx.click();
+  } else {
+    return;
+  }
   el.modal.hidden = true;
+  refresh();
   if (data.act === 'restart') restart();
 });
+
+// 点 3D 画面：玩偶 → 详情 / 出售；盘面上的符号 → 实际赔率
+let downAt: { x: number; y: number } | null = null;
+$('stage').addEventListener('pointerdown', (e) => { downAt = { x: e.clientX, y: e.clientY }; });
+$('stage').addEventListener('pointerup', (e) => {
+  const moved = !downAt || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 12;
+  downAt = null;
+  if (moved || spinning || !el.modal.hidden) return;
+  const hit = stage.pick(e.clientX, e.clientY);
+  if (!hit) return;
+  unlock();
+  sfx.click();
+  if (hit.kind === 'doll') showDoll(hit.id);
+  else showSymbol(hit.id);
+});
+new ResizeObserver(syncInsets).observe(el.hud);
+new ResizeObserver(syncInsets).observe(el.panel);
+syncInsets();
+
 window.addEventListener('keydown', (e) => {
   if (!el.modal.hidden) return;
   if (e.code === 'Space') { e.preventDefault(); void doSpin(); }
@@ -306,6 +395,7 @@ if (import.meta.env.DEV) {
   (window as unknown as Record<string, unknown>).__slot = {
     stage,
     get session() { return session; },
+    refresh,
     win(n: number, big = n >= 100) {
       session.coins += n;
       const k = Math.min(n, 420);

@@ -22,9 +22,11 @@ const CZ = (TRAY.z1 - TRAY.z0) / NZ;
 const SLOPE = 5;
 
 /** 币盘里最多堆多少枚（再多只涨数字，不再加模型） */
-const PILE_CAP = 2600;
+const PILE_CAP = 2000;
 const FLY_CAP = 700;
 const TOTAL = PILE_CAP + FLY_CAP;
+
+const MAX_TAKE_FLIGHTS = 30;
 
 const FLY = 0, SETTLE = 1, SUCK = 2;
 
@@ -73,12 +75,25 @@ export class CoinPile {
   private restQuat = new Float32Array(TOTAL * 4);
 
   constructor() {
-    const geo = new THREE.CylinderGeometry(RADIUS, RADIUS, THICK, 8, 1);
-    const face = coinFaceTexture();
-    const gold = { color: 0xffbf3a, metalness: 1, roughness: 0.28, envMapIntensity: 1.5 };
-    const side = new THREE.MeshStandardMaterial({ ...gold, color: 0xd9962a });
-    const cap = new THREE.MeshStandardMaterial({ ...gold, map: face });
-    this.mesh = new THREE.InstancedMesh(geo, [side, cap, cap], TOTAL);
+    // 金币是高清的（不走像素化那一遍渲染）：用车削体做出凸起的币缘，比单纯的圆柱立体得多
+    const t = THICK / 2, dip = THICK * 0.28;
+    const profile = [
+      [0, dip], [RADIUS * 0.72, dip], [RADIUS * 0.8, t], [RADIUS * 0.96, t], [RADIUS, t * 0.45],
+      [RADIUS, -t * 0.45], [RADIUS * 0.96, -t], [RADIUS * 0.8, -t], [RADIUS * 0.72, -dip], [0, -dip],
+    ].map(([x, y]) => new THREE.Vector2(x, y));
+    const geo = new THREE.LatheGeometry(profile, 18);
+    geo.computeVertexNormals();
+    // 贴图按俯视方向平铺，这样正反两面都能印上花纹
+    const pos = geo.getAttribute('position'), uv = geo.getAttribute('uv');
+    for (let i = 0; i < pos.count; i++) {
+      uv.setXY(i, pos.getX(i) / (RADIUS * 2) + 0.5, pos.getZ(i) / (RADIUS * 2) + 0.5);
+    }
+    const gold = new THREE.MeshStandardMaterial({
+      color: 0xffd257, metalness: 1, roughness: 0.24, envMapIntensity: 2.6, map: coinFaceTexture(), side: THREE.DoubleSide,
+      // 金币不吃雾：它们是画面的主角，要比暗沉的像素背景亮一截
+      fog: false,
+    });
+    this.mesh = new THREE.InstancedMesh(geo, gold, TOTAL);
     this.mesh.frustumCulled = false;
     this.reset();
   }
@@ -150,16 +165,25 @@ export class CoinPile {
 
   /** 从金币山顶上拿走 n 枚，飞进机器的投币口 */
   take(n: number, slot: THREE.Vector3) {
+    let touched = false;
     for (let k = 0; k < n; k++) {
+      touched = true;
       // 从最高的几摞里随机挑一摞，取最上面那枚
       let best = -1, bestH = 0;
       for (let i = 0; i < this.cells.length; i++) {
         const h = this.cells[i].length + Math.random() * 1.5;
         if (this.cells[i].length > 0 && h > bestH) { bestH = h; best = i; }
       }
-      if (best < 0) return;
+      if (best < 0) break;
       const id = this.cells[best].pop()!;
       this.piled--;
+      if (k >= MAX_TAKE_FLIGHTS) {
+        // 一次拿走太多时，只让前几十枚真的飞过去，其余直接消失
+        const j = this.movers.findIndex((m) => m.id === id);
+        if (j >= 0) this.movers.splice(j, 1);
+        this.release(id);
+        continue;
+      }
       // 这枚可能还在“落定”动画里，先把它从动画列表摘掉
       const i = this.movers.findIndex((m) => m.id === id);
       if (i >= 0) this.movers.splice(i, 1);
@@ -173,6 +197,7 @@ export class CoinPile {
         toQuat: new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, Math.PI / 2)),
       });
     }
+    if (touched) this.mesh.instanceMatrix.needsUpdate = true;
   }
 
   private cellAt(x: number, z: number) {

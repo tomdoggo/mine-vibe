@@ -87,6 +87,12 @@ export class Dolls {
     });
   }
 
+  /** 射线点中了哪个玩偶 */
+  pick(ray: THREE.Raycaster): DollId | null {
+    const hit = ray.intersectObjects(this.slots.filter((s) => s.doll).map((s) => s.sprite))[0];
+    return hit ? this.slots.find((s) => s.sprite === hit.object)!.doll : null;
+  }
+
   /** 玩偶效果触发：跳一下、闪一下 */
   trigger(id: DollId) {
     const s = this.slots.find((x) => x.doll === id);
