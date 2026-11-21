@@ -181,20 +181,32 @@ const ART: Record<DollId, Art> = {
   },
 };
 
-export const DOLL_ART_SIZE = 12;
+const ART_SIZE = 12;
+/** 四周各留 1 像素给描边 */
+export const DOLL_ART_SIZE = ART_SIZE + 2;
+const OUTLINE = '#f4efe0';
 
-/** 画成一张 12×12 的小画布（3D 贴图和商店图标共用） */
+/** 画成一张带浅色描边的小画布（3D 贴图和界面图标共用）。深色玩偶在暗背景上全靠这圈描边才看得清 */
 export function dollCanvas(id: DollId): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = c.height = DOLL_ART_SIZE;
   const g = c.getContext('2d')!;
   const { palette, rows } = ART[id];
+  const solid = (x: number, y: number) => palette[rows[y]?.[x]] !== undefined;
+  g.fillStyle = OUTLINE;
+  for (let y = -1; y <= ART_SIZE; y++) {
+    for (let x = -1; x <= ART_SIZE; x++) {
+      if (!solid(x, y) && (solid(x - 1, y) || solid(x + 1, y) || solid(x, y - 1) || solid(x, y + 1))) {
+        g.fillRect(x + 1, y + 1, 1, 1);
+      }
+    }
+  }
   rows.forEach((row, y) => {
     for (let x = 0; x < row.length; x++) {
       const color = palette[row[x]];
       if (!color) continue;
       g.fillStyle = color;
-      g.fillRect(x, y, 1, 1);
+      g.fillRect(x + 1, y + 1, 1, 1);
     }
   });
   return c;

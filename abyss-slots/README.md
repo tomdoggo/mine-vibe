@@ -53,7 +53,9 @@ npm run artifact  # 打成单文件 artifact/abyss-slots.html，用来发布到 
 - 机器和场景只渲染 400 行像素，再用最近邻放大到屏幕（`scene.ts` 的 `PIXEL_ROWS`）
 - 金币例外：放大之后按屏幕原生分辨率单独再画一遍，用低清那一遍的深度图做遮挡，所以金币是高清立体的，其余是像素块
 - 符号先用矢量路径画，再缩到 32×32 并压色（`symbols.ts` 的 `pixelate`）；玩偶是手点的 12×12 像素画（`dollArt.ts`）
-- 镜头会避开顶栏和底部面板（`Stage.setInsets`），机器始终完整落在两者之间
+- 金币数、剩余转数、深渊层数与进度、6 种符号的实际赔率都直接显示在机台上（`displays.ts`：小画布贴图 + 自带 5×7 点阵字），被玩偶改过的赔率标成绿色；屏幕上除了下注面板只剩一个设置齿轮
+- 玩偶贴图带一圈浅色描边（`dollArt.ts`），和显示屏、金币一样画在高清层，像素边缘是锐利的
+- 镜头会避开底部面板（`Stage.setInsets`），机器始终完整露出
 
 ## 目录
 
@@ -66,5 +68,6 @@ npm run artifact  # 打成单文件 artifact/abyss-slots.html，用来发布到 
 | `src/render/coins.ts` | 金币喷射、弹跳、堆积（InstancedMesh + 沙堆模型，不用物理引擎） |
 | `src/render/symbols.ts` | 用 canvas 现画的符号 / 金币 / 招牌贴图 |
 | `src/render/dolls.ts`、`dollArt.ts` | 玩偶台阶、玩偶像素画 |
+| `src/render/displays.ts` | 机台上的赔率表和状态栏 |
 | `src/audio.ts` | WebAudio 合成音效 |
 | `scripts/sim.ts` | 数值模拟脚本 |

@@ -4,11 +4,12 @@ import { dollCanvas } from './dollArt.ts';
 import { TRAY } from './coins.ts';
 
 const PER_SIDE = CONFIG.dollSlotsPerSide;
-const SIZE = 0.66;
+const SIZE = 0.9;
 /** 台阶：越靠近机器越高，这样 5 个玩偶从正面看不会互相挡住 */
-const STEP_H = 0.46;
+const STEP_H = 0.72;
 const STEP_D = 0.7;
 const BASE_H = 0.5;
+const STEP_W = 0.85;
 
 interface Slot {
   pos: THREE.Vector3;
@@ -27,7 +28,8 @@ export class Dolls {
   private textures = new Map<DollId, THREE.Texture>();
   private time = 0;
 
-  constructor() {
+  /** layer：玩偶贴图画在哪一层（高清层，像素边缘才锐利） */
+  constructor(layer: number) {
     const stone = new THREE.MeshStandardMaterial({ color: 0x1c151b, metalness: 0.6, roughness: 0.6 });
     const trim = new THREE.MeshStandardMaterial({ color: 0x9a6a22, metalness: 1, roughness: 0.35 });
     const plane = new THREE.PlaneGeometry(SIZE, SIZE);
@@ -36,18 +38,19 @@ export class Dolls {
       const side = i % 2 === 0 ? -1 : 1;
       const k = Math.floor(i / 2);
       const h = BASE_H + k * STEP_H;
-      const x = side * (TRAY.x1 + 0.42);
+      const x = side * (TRAY.x1 + 0.03 + STEP_W / 2);
       const z = TRAY.z1 - 0.3 - k * STEP_D;
-      const block = new THREE.Mesh(new THREE.BoxGeometry(0.72, h, STEP_D), stone);
+      const block = new THREE.Mesh(new THREE.BoxGeometry(STEP_W, h, STEP_D), stone);
       block.position.set(x, h / 2, z);
-      const cap = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.05, STEP_D + 0.02), trim);
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(STEP_W + 0.04, 0.05, STEP_D + 0.02), trim);
       cap.position.set(x, h, z);
       this.group.add(block, cap);
 
-      const mat = new THREE.MeshBasicMaterial({ transparent: true, alphaTest: 0.5, side: THREE.DoubleSide });
+      const mat = new THREE.MeshBasicMaterial({ transparent: true, alphaTest: 0.5, side: THREE.DoubleSide, toneMapped: false, fog: false });
       const sprite = new THREE.Mesh(plane, mat);
       sprite.visible = false;
-      const pos = new THREE.Vector3(x, h + 0.03 + SIZE / 2, z);
+      sprite.layers.set(layer);
+      const pos = new THREE.Vector3(x, h + SIZE / 2 - 0.02, z);
       sprite.position.copy(pos);
       // 左边的玩偶镜像一下，都朝向机器
       if (side < 0) sprite.scale.x = -1;
@@ -107,7 +110,8 @@ export class Dolls {
       const idle = Math.sin(this.time * 2.2 + s.seed) * 0.02;
       const jump = Math.abs(Math.sin(s.hop * Math.PI * 3)) * s.hop * 0.45;
       s.sprite.position.y = s.pos.y + idle + jump;
-      s.mat.color.setScalar(1 + s.hop * 1.6);
+      const flash = 1 + s.hop * 0.6;
+      s.sprite.scale.set(Math.sign(s.sprite.scale.x) * flash, flash, 1);
     }
   }
 }

@@ -14,10 +14,10 @@ import { load, save } from './storage.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = {
-  coins: $('coins'), coinsBox: $('coins').parentElement!, spins: $('spins'), abyss: $('abyss'), bet: $('bet'),
-  hud: document.querySelector<HTMLElement>('.hud')!, panel: document.querySelector<HTMLElement>('.panel')!,
+  coins: $('coins'), spins: $('spins'), abyss: $('abyss'), bet: $('bet'),
+  panel: document.querySelector<HTMLElement>('.panel')!,
   range: $<HTMLInputElement>('bet-range'), spin: $<HTMLButtonElement>('spin'),
-  banner: $('banner'), toasts: $('toasts'), modal: $('modal'), mute: $('btn-mute'),
+  banner: $('banner'), toasts: $('toasts'), modal: $('modal'),
 };
 
 const BEST_KEY = 'abyss-slots:best';
@@ -38,10 +38,7 @@ const coins = stage.coins;
 coins.onLand = (value) => {
   if (!value) return;
   shown += value;
-  el.coins.textContent = fmt(shown);
-  el.coinsBox.classList.remove('bump');
-  void el.coinsBox.offsetWidth;
-  el.coinsBox.classList.add('bump');
+  showStatus();
   sfx.coin();
 };
 coins.onInsert = () => sfx.insert();
@@ -58,15 +55,32 @@ function fmt(n: number) {
 /** 告诉 3D 镜头顶栏和底部面板各占了多高，机器要完整露在两者之间 */
 function syncInsets() {
   const app = document.getElementById('app')!.getBoundingClientRect();
-  // 两条界面的边缘都是渐变淡出的，淡出那一段不算遮挡
-  const top = el.hud.getBoundingClientRect().bottom - app.top - 12;
+  // 顶上只有一个小齿轮；底部面板的边缘是渐变淡出的，淡出那一段不算遮挡
+  const top = 4;
   const bottom = app.bottom - el.panel.getBoundingClientRect().top - 20;
   stage.setInsets(Math.max(0, Math.round(top)), Math.max(0, Math.round(bottom)));
 }
 
+/** 机台上的状态栏：金币 / 剩余转数 / 深渊层数和本层进度 */
+function showStatus() {
+  el.coins.textContent = fmt(shown);
+  stage.displays.setStatus({
+    coins: shown,
+    spinsLeft: session.spinsLeft,
+    level: abyssLevel(session),
+    progress: session.spinsDone % CONFIG.abyssEvery,
+    perLevel: CONFIG.abyssEvery,
+  });
+}
+
 function refresh() {
   bet = clampBet(session, bet);
-  el.coins.textContent = fmt(shown);
+  showStatus();
+  // 机台上的赔率表永远是算上玩偶之后的实际值
+  stage.displays.setPaytable([...SYMBOLS].reverse().map((sym) => {
+    const o = symbolOdds(session, sym.id);
+    return { id: sym.id, mult: o.mult, boosted: o.mult !== o.base };
+  }));
   el.spins.textContent = String(session.spinsLeft);
   el.abyss.textContent = String(abyssLevel(session));
   el.bet.textContent = String(bet);
@@ -320,17 +334,27 @@ $('bet-minus').addEventListener('click', () => setBet(bet - 1));
 $('bet-plus').addEventListener('click', () => setBet(bet + 1));
 $('bet-max').addEventListener('click', () => setBet(maxBetOf(session)));
 el.range.addEventListener('input', () => setBet(Number(el.range.value)));
-$('btn-info').addEventListener('click', () => { unlock(); sfx.click(); showPaytable(); });
-el.mute.addEventListener('click', () => {
+function showSettings() {
+  showModal(`
+    <h2>设置</h2>
+    <button class="btn ghost" data-open="help">玩法说明</button>
+    <button class="btn ghost" data-open="mute">声音：${isMuted() ? '关' : '开'}</button>
+    <button class="btn ghost" data-act="restart">重新开始</button>
+    <button class="btn" data-act="close">返回</button>
+  `);
+}
+$('btn-settings').addEventListener('click', () => {
+  if (spinning || session.offer) return;
   unlock();
-  setMuted(!isMuted());
-  el.mute.classList.toggle('off', isMuted());
+  sfx.click();
+  showSettings();
 });
-el.mute.classList.toggle('off', isMuted());
 el.modal.addEventListener('click', (e) => {
   const data = (e.target as HTMLElement).closest<HTMLElement>('button')?.dataset;
   if (!data) return;
   unlock();
+  if (data.open === 'help') { sfx.click(); return showPaytable(); }
+  if (data.open === 'mute') { setMuted(!isMuted()); sfx.click(); return showSettings(); }
   if (data.take) {
     if (!takeDoll(session, data.take as DollId)) return;
     sfx.win(false);
@@ -366,7 +390,6 @@ $('stage').addEventListener('pointerup', (e) => {
   if (hit.kind === 'doll') showDoll(hit.id);
   else showSymbol(hit.id);
 });
-new ResizeObserver(syncInsets).observe(el.hud);
 new ResizeObserver(syncInsets).observe(el.panel);
 syncInsets();
 

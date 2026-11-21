@@ -8,8 +8,9 @@ import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import type { DollId, SymbolId } from '../game/config.ts';
 import { CoinPile, TRAY } from './coins.ts';
 import { Dolls } from './dolls.ts';
+import { DISPLAY_WIDTH, Displays } from './displays.ts';
 import { REEL_GAP, Reels } from './reels.ts';
-import { signTexture, windowShadeTexture } from './symbols.ts';
+import { windowShadeTexture } from './symbols.ts';
 
 /** 滚轮窗口中心的高度 */
 const WIN_Y = 3.4;
@@ -29,7 +30,10 @@ export const SLOT = new THREE.Vector3(2.03, WIN_Y, 0.4);
  * 所以金币是高清的，其余是像素块。
  */
 const PIXEL_ROWS = 400;
+/** 高清层：金币、玩偶、机台上的显示屏 */
 const COIN_LAYER = 1;
+/** 滚轮窗口上方那块面板的高度（放状态栏和赔率表） */
+const TOP_H = 2.4;
 
 export type Pick = { kind: 'doll'; id: DollId } | { kind: 'symbol'; id: SymbolId };
 
@@ -39,7 +43,8 @@ export class Stage {
   readonly camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
   readonly reels: Reels;
   readonly coins = new CoinPile();
-  readonly dolls = new Dolls();
+  readonly dolls = new Dolls(COIN_LAYER);
+  readonly displays = new Displays(COIN_LAYER);
 
   private composer: EffectComposer;
   private bloom: UnrealBloomPass;
@@ -104,11 +109,11 @@ export class Stage {
       // 滚轮之间的隔条
       box(0.14, WIN_HALF_H * 2, 0.2, ironDark, s * REEL_GAP * 0.5, WIN_Y, 0.12);
     }
-    box(BODY_HALF_W * 2, 1.0, BODY_DEPTH, iron, 0, winTop + 0.5, midZ);
+    box(BODY_HALF_W * 2, TOP_H, BODY_DEPTH, iron, 0, winTop + TOP_H / 2, midZ);
     box(BODY_HALF_W * 2, winBot, BODY_DEPTH, iron, 0, winBot / 2, midZ);
     box(WIN_HALF_W * 2 + 0.14, 0.07, 0.1, brass, 0, winTop + 0.035, FRONT_Z + 0.02);
     box(WIN_HALF_W * 2 + 0.14, 0.07, 0.1, brass, 0, winBot - 0.035, FRONT_Z + 0.02);
-    box(BODY_HALF_W * 2 + 0.2, 0.12, BODY_DEPTH + 0.2, brass, 0, winTop + 1.06, midZ);
+    box(BODY_HALF_W * 2 + 0.2, 0.12, BODY_DEPTH + 0.2, brass, 0, winTop + TOP_H + 0.06, midZ);
 
     // 窗口上的曲面暗角
     const shade = new THREE.Mesh(
@@ -118,29 +123,26 @@ export class Stage {
     shade.position.set(0, WIN_Y, 0.06);
     scene.add(shade);
 
-    // 招牌
-    const sign = new THREE.Mesh(
-      new THREE.PlaneGeometry(3.6, 0.68),
-      new THREE.MeshBasicMaterial({ map: signTexture(), color: new THREE.Color(1.5, 1.5, 1.5) }),
-    );
-    sign.position.set(0, winTop + 0.5, FRONT_Z + 0.01);
-    scene.add(sign);
+    // 窗口上方：状态栏 + 赔率表两块显示屏（像实体机那样把信息印在机台上）
+    this.displays.group.position.set(0, winTop + 0.14 + this.displays.statusHeight / 2, FRONT_Z + 0.07);
+    scene.add(this.displays.group);
+    box(DISPLAY_WIDTH + 0.12, 0.05, 0.1, brass, 0, winTop + TOP_H - 0.02, FRONT_Z + 0.02);
 
     // 顶上的拱形山花 + 血宝石
     const arch = new THREE.Shape();
     arch.moveTo(-BODY_HALF_W, 0);
     arch.lineTo(BODY_HALF_W, 0);
-    arch.absellipse(0, 0, BODY_HALF_W, 1.0, 0, Math.PI, false);
+    arch.absellipse(0, 0, BODY_HALF_W, 0.7, 0, Math.PI, false);
     const pediment = new THREE.Mesh(new THREE.ExtrudeGeometry(arch, { depth: 1.2, bevelEnabled: false }), iron);
-    pediment.position.set(0, winTop + 1.12, FRONT_Z - 1.2);
+    pediment.position.set(0, winTop + TOP_H + 0.12, FRONT_Z - 1.2);
     scene.add(pediment);
     this.gem = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.3),
+      new THREE.OctahedronGeometry(0.24),
       new THREE.MeshStandardMaterial({
         color: 0x5a0008, emissive: 0xff0a1e, emissiveIntensity: 2.2, metalness: 0.3, roughness: 0.15,
       }),
     );
-    this.gem.position.set(0, winTop + 1.6, FRONT_Z + 0.12);
+    this.gem.position.set(0, winTop + TOP_H + 0.5, FRONT_Z + 0.12);
     this.gem.scale.set(1, 1.35, 0.6);
     scene.add(this.gem);
 
@@ -193,19 +195,19 @@ export class Stage {
     // 机顶两支蜡烛
     const wax = new THREE.MeshStandardMaterial({ color: 0xd8cdb0, roughness: 0.7, emissive: 0x3a1c08 });
     for (const s of [-1, 1]) {
-      const x = s * 1.85, y = winTop + 1.12, z = FRONT_Z - 0.35;
-      const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 0.7, 12), wax);
-      stick.position.set(x, y + 0.35, z);
+      const x = s * 1.85, y = winTop + TOP_H + 0.12, z = FRONT_Z - 0.35;
+      const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 0.4, 12), wax);
+      stick.position.set(x, y + 0.2, z);
       scene.add(stick);
       const flame = new THREE.Mesh(
         new THREE.SphereGeometry(0.09, 10, 10),
         new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 1.6, 0.5) }),
       );
       flame.scale.set(1, 1.9, 1);
-      flame.position.set(x, y + 0.86, z);
+      flame.position.set(x, y + 0.56, z);
       scene.add(flame);
       const light = new THREE.PointLight(0xff8a30, 7, 9, 1.8);
-      light.position.set(x, y + 1.0, z + 0.5);
+      light.position.set(x, y + 0.7, z + 0.5);
       scene.add(light);
       this.candles.push({ light, flame, seed: s * 3.1 });
     }
@@ -271,10 +273,10 @@ export class Stage {
     const cam = this.camera;
     cam.aspect = w / h;
     // 竖屏为主：保证机器的宽度永远塞得进屏幕，屏幕越窄相机拉得越远
-    const target = new THREE.Vector3(0, 2.75, 1.2);
+    const target = new THREE.Vector3(0, 3.6, 1.2);
     // 顶部状态栏和底部操作面板会盖住画面，机器必须完整落在两者之间（矮屏幕 / 横屏时由高度决定距离）
     const { top, bottom } = this.insets;
-    const halfW = 3.1, halfH = 4.45 / Math.max(0.4, (h - top - bottom) / h);
+    const halfW = 3.15, halfH = 5.0 / Math.max(0.4, (h - top - bottom) / h);
     const tanV = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
     const dist = Math.max(halfW / (tanV * cam.aspect), halfH / tanV);
     const dir = new THREE.Vector3(0, 0.3, 1).normalize();
@@ -304,6 +306,7 @@ export class Stage {
     const r = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     const ray = new THREE.Raycaster();
+    ray.layers.enableAll();
     this.camera.layers.set(0);
     this.camera.updateMatrixWorld();
     ray.setFromCamera(ndc, this.camera);
