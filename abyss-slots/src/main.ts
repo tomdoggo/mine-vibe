@@ -1,8 +1,8 @@
 import './style.css';
 import { BIG_WIN_MULT, CONFIG, DOLLS, SYMBOLS, type DollId, type SymbolId } from './game/config.ts';
 import {
-  abyssLevel, clampBet, DOLL_BY_ID, isOver, MAX_DOLLS, maxBetOf, newSession, offerDue, rollOffer, SELL_PRICE,
-  sellDoll, skipOffer, spin, SYMBOL_BY_ID, symbolOdds, takeDoll,
+  abyssLevel, clampBet, DOLL_BY_ID, isOver, MAX_DOLLS, maxBetOf, newSession, payToll, rollOffer, SELL_PRICE,
+  sellDoll, skipOffer, spin, SYMBOL_BY_ID, symbolOdds, takeDoll, tollCost, tollDue,
   type Session, type SpinResult,
 } from './game/slot.ts';
 import { makeRng, randomSeed } from './game/rng.ts';
@@ -68,8 +68,10 @@ function showStatus() {
     coins: shown,
     spinsLeft: session.spinsLeft,
     level: abyssLevel(session),
-    progress: session.spinsDone % CONFIG.abyssEvery,
+    progress: Math.min(CONFIG.abyssEvery, session.spinsDone - (abyssLevel(session) - 1) * CONFIG.abyssEvery),
     perLevel: CONFIG.abyssEvery,
+    // 最后一层转完就结算了，不用再付
+    toll: abyssLevel(session) * CONFIG.abyssEvery < CONFIG.maxSpins ? tollCost(session) : null,
   });
 }
 
@@ -183,7 +185,6 @@ async function doSpin() {
   unlock();
   spinning = true;
   const before = session.coins;
-  const level = abyssLevel(session);
   let result = spin(session, bet, rng);
   // 下注：金币从币盘飞进投币口
   spend(result.bet, before, SLOT);
@@ -195,21 +196,53 @@ async function doSpin() {
     await present(result);
   }
   spinning = false;
-  if (abyssLevel(session) > level) {
-    stage.setAbyss(abyssLevel(session));
-    stage.punch(0.5, 0.6);
-    toast(null, `深渊 ${abyssLevel(session)} 层 · 下注上限 ${maxBetOf(session)}`);
-  }
   refresh();
   if (isOver(session)) void finish();
-  else offerDolls();
+  else if (tollDue(session)) void showToll();
+}
+
+/* ---------------- 深渊：花钱下潜 ---------------- */
+
+/** 这一层转满了：付得起就弹出下潜确认，付不起直接失败 */
+async function showToll() {
+  const cost = tollCost(session);
+  if (session.coins < cost) {
+    // 等天上的金币落完，让玩家看清确实不够
+    spinning = true;
+    refresh();
+    while (coins.busy) await wait(0.2);
+    spinning = false;
+    payToll(session);
+    refresh();
+    void finish();
+    return;
+  }
+  const level = abyssLevel(session);
+  showModal(`
+    <h2>深渊 ${level} 层到底了</h2>
+    <p>支付下潜费才能继续，付不起就此出局。<br>
+    下一层下注上限 ${maxBetOf(session)} → ${maxBetOf(session) * 2}，还能挑一个玩偶。</p>
+    <div class="odds">${cost}</div>
+    <p>持有金币 ${fmt(session.coins)}</p>
+    <button class="btn" data-toll="1">支付 ${cost}，下潜到 ${level + 1} 层</button>
+  `);
+}
+
+function descend() {
+  const before = session.coins;
+  const paid = payToll(session);
+  if (!paid.ok) return;
+  spend(paid.cost, before, stage.gemPos);
+  sfx.win(true);
+  stage.setAbyss(abyssLevel(session));
+  stage.punch(0.6, 0.8);
+  toast(null, `深渊 ${abyssLevel(session)} 层 · 下注上限 ${maxBetOf(session)}`);
 }
 
 /* ---------------- 玩偶：二选一 / 出售 ---------------- */
 
-/** 到点了就弹出玩偶选择（开局一次，之后每 offerEvery 转一次） */
+/** 弹出玩偶二选一（开局一次，之后每次下潜成功一次） */
 function offerDolls() {
-  if (!offerDue(session)) return;
   const offer = rollOffer(session, rng);
   if (!offer) return;
   const cards = offer.map((id) => `<button class="pick" data-take="${id}"><span data-doll="${id}"></span>
@@ -278,12 +311,13 @@ async function finish() {
   save(BEST_KEY, String(best));
   const bust = final < CONFIG.minBet;
   const profit = final - CONFIG.startCoins;
-  if (bust) sfx.lose();
+  if (bust || session.failed) sfx.lose();
   else if (profit > 0) sfx.win(final >= 100);
-  const title = bust ? '输个精光' : profit > 0 ? (final >= 200 ? '满载而归' : '小赚一笔') : '白忙一场';
+  const title = session.failed ? '付不起下潜费' : bust ? '输个精光'
+    : profit > 0 ? (final >= 200 ? '满载而归' : '小赚一笔') : '白忙一场';
   showModal(`
     <h2>${title}</h2>
-    <p>${bust ? '金币输光了' : '转数用完，最终金币'}</p>
+    <p>${session.failed ? `下潜到 ${abyssLevel(session) + 1} 层需要 ${tollCost(session)} 金币，手里只有` : bust ? '金币输光了' : '转数用完，最终金币'}</p>
     <div class="final">${fmt(final)}</div>
     <p>深渊 ${abyssLevel(session)} 层 · 玩偶 ${session.dolls.length} 个<br>本局最高 ${fmt(session.peak)} · 历史最佳 ${fmt(best)}</p>
     <button class="btn" data-act="restart">再来一局</button>
@@ -304,8 +338,10 @@ function showPaytable() {
     <h2>玩法</h2>
     <p>${CONFIG.startCoins} 枚金币开局，${CONFIG.maxSpins} 转之内赢到尽可能多的金币。<br>
     横、竖、斜共 8 条线，三连即中奖，奖金 = 下注 × 赔率。<br>
-    每转 ${CONFIG.abyssEvery} 次深渊加深一层，下注上限翻倍。<br>
-    开局和每转 ${CONFIG.offerEvery} 次可以二选一拿一个玩偶，<br>点玩偶可以出售，点盘面上的符号可以看实际赔率。</p>
+    基础赔率是亏的，要靠玩偶把赔率堆上去。<br>
+    每转 ${CONFIG.abyssEvery} 次必须付下潜费进入下一层，付不起就出局；<br>
+    每深一层下注上限翻倍，并且可以二选一拿一个玩偶。<br>
+    点玩偶可以出售，点盘面上的符号可以看实际赔率。</p>
     <table class="pay">${rows}</table>
     <button class="btn" data-act="close">知道了</button>
   `);
@@ -324,7 +360,7 @@ function restart() {
   // 开局的金币也从出币口吐出来
   coins.fountain(MOUTH, split(session.coins, session.coins), 0.5, 0.8);
   refresh();
-  offerDolls();
+  if (CONFIG.offerAtStart) offerDolls();
 }
 
 /* ---------------- 事件 ---------------- */
@@ -355,6 +391,12 @@ el.modal.addEventListener('click', (e) => {
   unlock();
   if (data.open === 'help') { sfx.click(); return showPaytable(); }
   if (data.open === 'mute') { setMuted(!isMuted()); sfx.click(); return showSettings(); }
+  if (data.toll) {
+    el.modal.hidden = true;
+    descend();
+    refresh();
+    return offerDolls();
+  }
   if (data.take) {
     if (!takeDoll(session, data.take as DollId)) return;
     sfx.win(false);

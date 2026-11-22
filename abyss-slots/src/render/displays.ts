@@ -93,15 +93,17 @@ export interface Status {
   /** 这一层已经转了几次 / 一层要转几次 */
   progress: number;
   perLevel: number;
+  /** 下潜到下一层的费用；null = 已经是最后一层，不用再付 */
+  toll: number | null;
 }
 
 export const DISPLAY_WIDTH = 4.6;
 
 export class Displays {
   readonly group = new THREE.Group();
-  /** 赔率表 264×76，状态栏 264×40，宽度都是 DISPLAY_WIDTH */
+  /** 赔率表 264×76，状态栏 264×62，宽度都是 DISPLAY_WIDTH */
   private pay = panel(264, 76, DISPLAY_WIDTH);
-  private status = panel(264, 40, DISPLAY_WIDTH);
+  private status = panel(264, 62, DISPLAY_WIDTH);
   private icons = new Map<SymbolId, HTMLCanvasElement>();
   private lastPay = '';
   private lastStatus = '';
@@ -137,42 +139,59 @@ export class Displays {
     tex.needsUpdate = true;
   }
 
-  /** 状态栏：金币 | 剩余转数 | 深渊层数 + 本层进度 */
+  /**
+   * 状态栏两行：
+   *   金币            剩余转数
+   *   深渊层数 + 本层进度条    下潜费（付得起是金色，付不起是红色）
+   */
   setStatus(s: Status) {
     const key = JSON.stringify(s);
     if (key === this.lastStatus) return;
     this.lastStatus = key;
     const { g, clear, tex } = this.status;
     clear();
-    // 金币
-    disc(g, 14, 20, 7, '#8a5a08');
-    disc(g, 14, 20, 6, GOLD);
-    g.fillStyle = '#fff3b0';
-    g.fillRect(11, 16, 2, 2);
-    drawText(g, compact(s.coins), 26, 13, 2, GOLD);
+    // 第一行：金币
+    coinIcon(g, 14, 16);
+    drawText(g, compact(s.coins), 26, 9, 2, GOLD);
     // 剩余转数：沙漏
     g.fillStyle = BONE;
     for (let i = 0; i < 7; i++) {
       const half = 6 - Math.min(i, 5);
-      g.fillRect(118 - half, 13 + i, half * 2, 1);
-      g.fillRect(118 - half, 26 - i, half * 2, 1);
+      g.fillRect(196 - half, 9 + i, half * 2, 1);
+      g.fillRect(196 - half, 22 - i, half * 2, 1);
     }
-    drawText(g, String(s.spinsLeft), 130, 13, 2, BONE);
-    // 深渊：血宝石 + 层数 + 进度条
+    drawText(g, String(s.spinsLeft), 208, 9, 2, BONE);
+    // 第二行：血宝石 + 层数 + 进度条
     g.fillStyle = BLOOD;
     for (let dy = -7; dy <= 7; dy++) {
       const half = Math.max(0, 5 - Math.ceil(Math.abs(dy) * 0.7));
-      g.fillRect(182 - half, 20 + dy, half * 2 + 1, 1);
+      g.fillRect(14 - half, 46 + dy, half * 2 + 1, 1);
     }
-    drawText(g, String(s.level), 192, 13, 2, BLOOD);
-    const barX = 192 + String(s.level).length * 12 + 2;
-    const seg = Math.max(2, Math.floor((258 - barX) / s.perLevel) - 1);
+    drawText(g, String(s.level), 26, 39, 2, BLOOD);
+    const barX = 26 + String(s.level).length * 12 + 4;
     for (let i = 0; i < s.perLevel; i++) {
       g.fillStyle = i < s.progress ? BLOOD : '#3a1418';
-      g.fillRect(barX + i * (seg + 1), 14, seg, 12);
+      g.fillRect(barX + i * 8, 40, 6, 12);
+    }
+    // 下潜费：向下的箭头 + 金币数
+    if (s.toll !== null) {
+      const color = s.coins >= s.toll ? GOLD : BLOOD;
+      const x = barX + s.perLevel * 8 + 10;
+      g.fillStyle = color;
+      g.fillRect(x + 3, 39, 4, 7);
+      for (let i = 0; i < 6; i++) g.fillRect(x + i, 46 + i, 10 - i * 2, 1);
+      coinIcon(g, x + 22, 46);
+      drawText(g, compact(s.toll), x + 34, 39, 2, color);
     }
     tex.needsUpdate = true;
   }
+}
+
+function coinIcon(g: CanvasRenderingContext2D, cx: number, cy: number) {
+  disc(g, cx, cy, 7, '#8a5a08');
+  disc(g, cx, cy, 6, GOLD);
+  g.fillStyle = '#fff3b0';
+  g.fillRect(cx - 3, cy - 4, 2, 2);
 }
 
 /** 不抗锯齿的实心圆 */

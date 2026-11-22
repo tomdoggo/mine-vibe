@@ -6,7 +6,7 @@
  */
 import { CONFIG, DOLLS, SYMBOLS, type DollId } from '../src/game/config.ts';
 import {
-  clampBet, evaluate, isOver, maxBetOf, newSession, offerDue, rollGrid, rollOffer, skipOffer, spinChain, takeDoll,
+  clampBet, evaluate, isOver, maxBetOf, newSession, payToll, rollGrid, rollOffer, skipOffer, spinChain, takeDoll, tollDue,
   type Session,
 } from '../src/game/slot.ts';
 import { makeRng } from '../src/game/rng.ts';
@@ -65,34 +65,39 @@ console.log('\n== 1b. 带玩偶时的单转返还率（押 10，深渊 1 层，�
   console.log(`${'全部 10 个'.padEnd(5, '　')} ${pct(rtp(DOLLS.map((d) => d.id)))}`);
 }
 
-interface Stats { bust: number; up: number; median: number; mean: number; p90: number; max: number }
+interface Stats { bust: number; failed: number; up: number; median: number; mean: number; p90: number; max: number; reach: number[] }
 
 /** dolls: 'take' = 每次都拿第一个玩偶；'skip' = 每次都跳过拿金币；only = 只在出现这个玩偶时拿，其余跳过 */
 function play(n: number, pick: (s: Session) => number, opts: { dolls: 'take' | 'skip'; only?: DollId }): Stats {
   const finals: number[] = [];
-  let bust = 0, up = 0;
+  let bust = 0, failed = 0, up = 0;
+  const reach: number[] = [];
   for (let i = 0; i < n; i++) {
     const rng = makeRng(i * 7919 + 13);
     const s = newSession();
+    const offer = () => {
+      const o = rollOffer(s, rng);
+      if (!o) return;
+      const want = opts.only ? o.find((id) => id === opts.only) : opts.dolls === 'take' ? o[0] : undefined;
+      if (want) takeDoll(s, want);
+      else skipOffer(s);
+    };
+    if (CONFIG.offerAtStart) offer();
     while (!isOver(s)) {
-      if (offerDue(s)) {
-        const offer = rollOffer(s, rng);
-        if (offer) {
-          const want = opts.only ? offer.find((id) => id === opts.only) : opts.dolls === 'take' ? offer[0] : undefined;
-          if (want) takeDoll(s, want);
-          else skipOffer(s);
-        }
-      }
       spinChain(s, clampBet(s, pick(s)), rng);
+      if (tollDue(s) && payToll(s).ok) offer();
     }
-    finals.push(s.coins);
-    if (s.coins < CONFIG.minBet) bust++;
-    if (s.coins > CONFIG.startCoins) up++;
+    reach[s.level] = (reach[s.level] ?? 0) + 1;
+    // 付不起下潜费算失败，成绩记 0
+    finals.push(s.failed ? 0 : s.coins);
+    if (s.failed) failed++;
+    else if (s.coins < CONFIG.minBet) bust++;
+    if (!s.failed && s.coins > CONFIG.startCoins) up++;
   }
   finals.sort((a, b) => a - b);
   return {
-    bust: bust / n, up: up / n, median: finals[n >> 1], mean: finals.reduce((a, b) => a + b, 0) / n,
-    p90: finals[Math.floor(n * 0.9)], max: finals[n - 1],
+    bust: bust / n, failed: failed / n, up: up / n, median: finals[n >> 1],
+    mean: finals.reduce((a, b) => a + b, 0) / n, p90: finals[Math.floor(n * 0.9)], max: finals[n - 1], reach,
   };
 }
 
@@ -100,27 +105,31 @@ const strategies: [string, (s: Session) => number][] = [
   ['每次押 1', () => 1],
   ['每次押 10', () => 10],
   ['押一成身家', (s) => Math.ceil(s.coins * 0.1)],
-  ['押三成身家', (s) => Math.ceil(s.coins * 0.3)],
+  ['押两成身家', (s) => Math.ceil(s.coins * 0.2)],
+  ['押四成身家', (s) => Math.ceil(s.coins * 0.4)],
   ['每次押到上限', (s) => maxBetOf(s)],
 ];
 
 for (const dolls of ['skip', 'take'] as const) {
   console.log(`\n== 2${dolls === 'take' ? 'b' : 'a'}. 整局（${CONFIG.startCoins} 金币开局，${CONFIG.maxSpins} 转，${dolls === 'take' ? '每次都拿玩偶' : '每次都跳过拿金币'}）`);
-  console.log('策略            破产率    赚到钱   中位数       平均值    90分位      最高');
+  console.log('策略            输光  付不起  通关   中位数     90分位   | 止步于第几层（%）');
   for (const [name, pick] of strategies) {
-    const r = play(20_000 * K, pick, { dolls });
-    console.log(`${name.padEnd(8, '　')} ${pct(r.bust)} ${pct(r.up)} ${pad(r.median, 8)} ${pad(r.mean.toFixed(0), 12)} ${pad(r.p90, 9)} ${pad(r.max, 9)}`);
+    const n = 20_000 * K;
+    const r = play(n, pick, { dolls });
+    const clear = 1 - r.bust - r.failed;
+    const stops = Array.from({ length: 10 }, (_, i) => pad(Math.round(((r.reach[i + 1] ?? 0) / n) * 100), 3)).join('');
+    console.log(`${name.padEnd(8, '　')} ${pct(r.bust)} ${pct(r.failed)} ${pct(clear)} ${pad(r.median, 8)} ${pad(r.p90, 10)}   |${stops}`);
   }
 }
 
-console.log('\n== 3. 单个玩偶的价值（押一成身家；只拿这一个玩偶，其余全跳过；对比全跳过）');
+console.log('\n== 3. 单个玩偶的价值（押两成身家；只拿这一个玩偶，其余全跳过；对比全跳过）');
 {
-  const pick = strategies[2][1];
+  const pick = strategies[3][1];
   const base = play(20_000 * K, pick, { dolls: 'skip' });
-  console.log('玩偶        中位数   破产率');
-  console.log(`${'（全跳过）'.padEnd(5, '　')} ${pad(base.median, 8)} ${pct(base.bust)}`);
+  console.log('玩偶        通关率');
+  console.log(`${'（全跳过）'.padEnd(5, '　')} ${pct(1 - base.bust - base.failed)}`);
   for (const d of DOLLS) {
     const r = play(20_000 * K, pick, { dolls: 'skip', only: d.id });
-    console.log(`${d.name.padEnd(5, '　')} ${pad(r.median, 8)} ${pct(r.bust)}`);
+    console.log(`${d.name.padEnd(5, '　')} ${pct(1 - r.bust - r.failed)}`);
   }
 }

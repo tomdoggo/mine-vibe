@@ -24,8 +24,12 @@ export interface Session {
   dolls: DollId[];
   /** 连续没中奖的次数（黑猫用） */
   loseStreak: number;
-  /** 已经花掉的转数（免费旋转不算），决定深渊等级和下一次选玩偶的时机 */
+  /** 已经花掉的转数（免费旋转不算），决定什么时候该下潜 */
   spinsDone: number;
+  /** 深渊层数，从 1 开始，付了下潜费才 +1 */
+  level: number;
+  /** 付不起下潜费，对局失败 */
+  failed: boolean;
   /** 正等着玩家挑的玩偶；null = 现在没有选择 */
   offer: DollId[] | null;
 }
@@ -37,6 +41,8 @@ export const newSession = (): Session => ({
   dolls: [],
   loseStreak: 0,
   spinsDone: 0,
+  level: 1,
+  failed: false,
   offer: null,
 });
 
@@ -82,10 +88,32 @@ export function evaluate(grid: Grid): { wins: LineWin[]; mult: number } {
   return { wins, mult: wins.reduce((a, w) => a + w.mult, 0) };
 }
 
-export const isOver = (s: Session) => s.spinsLeft <= 0 || s.coins < CONFIG.minBet;
+export const isOver = (s: Session) => s.failed || s.spinsLeft <= 0 || s.coins < CONFIG.minBet;
 
-/** 深渊等级：从 1 层开始，每转 abyssEvery 次 +1 */
-export const abyssLevel = (s: Session) => 1 + Math.floor(s.spinsDone / CONFIG.abyssEvery);
+export const abyssLevel = (s: Session) => s.level;
+
+/** 下潜到下一层要付多少金币（表用完了就按最后一档继续翻倍） */
+export function tollCost(s: Session): number {
+  const costs = CONFIG.abyssCosts;
+  const i = s.level - 1;
+  return i < costs.length ? costs[i] : costs[costs.length - 1] * 2 ** (i - costs.length + 1);
+}
+
+/** 现在是不是该付下潜费了：每转满 abyssEvery 次一回，最后一转之后不用再付 */
+export const tollDue = (s: Session) =>
+  !s.failed && s.spinsLeft > 0 && s.spinsDone >= s.level * CONFIG.abyssEvery;
+
+/** 付下潜费：够就扣钱、深一层；不够就直接失败 */
+export function payToll(s: Session): { ok: boolean; cost: number } {
+  const cost = tollCost(s);
+  if (s.coins < cost) {
+    s.failed = true;
+    return { ok: false, cost };
+  }
+  s.coins -= cost;
+  s.level++;
+  return { ok: true, cost };
+}
 
 /** 下注上限：每深一层翻一倍 */
 export const maxBetOf = (s: Session) => CONFIG.baseMaxBet * 2 ** (abyssLevel(s) - 1);
@@ -131,9 +159,6 @@ export function symbolOdds(s: Session, id: SymbolId): SymbolOdds {
 
 /** 出售价：半价，向下取整 */
 export const SELL_PRICE = Math.floor(CONFIG.dollPrice / 2);
-
-/** 现在该不该弹出玩偶选择：开局一次，之后每 offerEvery 转一次 */
-export const offerDue = (s: Session) => s.spinsDone % CONFIG.offerEvery === 0;
 
 /** 从还没摆上台的玩偶里随机抽几个给玩家挑；没得挑（全拥有 / 位置满了）就返回 null */
 export function rollOffer(s: Session, rng: Rng): DollId[] | null {

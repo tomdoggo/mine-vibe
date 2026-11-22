@@ -33,7 +33,7 @@ const PIXEL_ROWS = 400;
 /** 高清层：金币、玩偶、机台上的显示屏 */
 const COIN_LAYER = 1;
 /** 滚轮窗口上方那块面板的高度（放状态栏和赔率表） */
-const TOP_H = 2.4;
+const TOP_H = 2.78;
 
 export type Pick = { kind: 'doll'; id: DollId } | { kind: 'symbol'; id: SymbolId };
 
@@ -273,10 +273,10 @@ export class Stage {
     const cam = this.camera;
     cam.aspect = w / h;
     // 竖屏为主：保证机器的宽度永远塞得进屏幕，屏幕越窄相机拉得越远
-    const target = new THREE.Vector3(0, 3.6, 1.2);
+    const target = new THREE.Vector3(0, 3.78, 1.2);
     // 顶部状态栏和底部操作面板会盖住画面，机器必须完整落在两者之间（矮屏幕 / 横屏时由高度决定距离）
     const { top, bottom } = this.insets;
-    const halfW = 3.15, halfH = 5.0 / Math.max(0.4, (h - top - bottom) / h);
+    const halfW = 3.3, halfH = 5.2 / Math.max(0.4, (h - top - bottom) / h);
     const tanV = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
     const dist = Math.max(halfW / (tanV * cam.aspect), halfH / tanV);
     const dir = new THREE.Vector3(0, 0.3, 1).normalize();
@@ -293,6 +293,11 @@ export class Stage {
     if (top === this.insets.top && bottom === this.insets.bottom) return;
     this.insets = { top, bottom };
     this.resize();
+  }
+
+  /** 顶上血宝石的位置（付下潜费时金币往这儿飞） */
+  get gemPos() {
+    return this.gem.position;
   }
 
   /** 深渊越深，红光越重 */

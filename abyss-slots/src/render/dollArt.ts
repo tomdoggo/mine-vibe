@@ -181,7 +181,14 @@ const ART: Record<DollId, Art> = {
   },
 };
 
-const ART_SIZE = 12;
+export const ART_SIZE = 12;
+
+/** 玩偶的像素格：每格是颜色或 null（透明）。3D 体素模型从这份数据挤出来 */
+export function dollPixels(id: DollId): (string | null)[][] {
+  const { palette, rows } = ART[id];
+  return rows.map((row) => Array.from({ length: ART_SIZE }, (_, x) => palette[row[x]] ?? null));
+}
+
 /** 四周各留 1 像素给描边 */
 export const DOLL_ART_SIZE = ART_SIZE + 2;
 const OUTLINE = '#f4efe0';
