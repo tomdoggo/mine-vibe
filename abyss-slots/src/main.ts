@@ -27,6 +27,8 @@ const rng = makeRng(params.has('seed') ? Number(params.get('seed')) : randomSeed
 
 let session: Session = newSession();
 let bet = 1;
+/** 上一转的奖金：停下后一直留在机台上，直到下一次开转 */
+let lastWin = 0;
 /** 滚轮还在转 */
 let spinning = false;
 /** 屏幕上显示的金币数：花钱立刻扣，赚的钱要等金币真正落进币盘才一枚枚加上去 */
@@ -64,8 +66,10 @@ function syncInsets() {
 /** 机台上的状态栏：金币 / 剩余转数 / 深渊层数和本层进度 */
 function showStatus() {
   el.coins.textContent = fmt(shown);
+  stage.displays.setPurse(shown);
+  stage.displays.setResult(bet, lastWin);
   stage.displays.setStatus({
-    coins: shown,
+    coins: session.coins,
     spinsLeft: session.spinsLeft,
     level: abyssLevel(session),
     progress: Math.min(CONFIG.abyssEvery, session.spinsDone - (abyssLevel(session) - 1) * CONFIG.abyssEvery),
@@ -145,8 +149,11 @@ const wait = (s: number) => new Promise<void>((r) => coins.later(s, r));
 async function present(result: SpinResult) {
   if (result.free) banner('<small>免费旋转</small>', false);
   sfx.spin();
+  lastWin = 0;
   refresh();
   await stage.reels.spin(result.grid);
+  lastWin = result.payout;
+  showStatus();
 
   for (const e of result.events) {
     stage.dolls.trigger(e.doll);
@@ -352,6 +359,7 @@ function restart() {
   session = newSession();
   bet = 1;
   shown = 0;
+  lastWin = 0;
   spinning = false;
   coins.reset();
   stage.reels.clearHighlight();

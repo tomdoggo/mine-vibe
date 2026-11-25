@@ -33,7 +33,7 @@ const PIXEL_ROWS = 400;
 /** 高清层：金币、玩偶、机台上的显示屏 */
 const COIN_LAYER = 1;
 /** 滚轮窗口上方那块面板的高度（放状态栏和赔率表） */
-const TOP_H = 2.78;
+const TOP_H = 2.4;
 
 export type Pick = { kind: 'doll'; id: DollId } | { kind: 'symbol'; id: SymbolId };
 
@@ -126,6 +126,13 @@ export class Stage {
     // 窗口上方：状态栏 + 赔率表两块显示屏（像实体机那样把信息印在机台上）
     this.displays.group.position.set(0, winTop + 0.14 + this.displays.statusHeight / 2, FRONT_Z + 0.07);
     scene.add(this.displays.group);
+    // 窗口正下方：下注 / 奖金
+    this.displays.resultMesh.position.set(0, (winBot + MOUTH.y + 0.31) / 2 - 0.02, FRONT_Z + 0.07);
+    scene.add(this.displays.resultMesh);
+    // 币盘前沿立一块余额牌，微微后仰对着镜头
+    this.displays.purseMesh.position.set(0, 0.56, TRAY.z1 + 0.16);
+    this.displays.purseMesh.rotation.x = -0.3;
+    scene.add(this.displays.purseMesh);
     box(DISPLAY_WIDTH + 0.12, 0.05, 0.1, brass, 0, winTop + TOP_H - 0.02, FRONT_Z + 0.02);
 
     // 顶上的拱形山花 + 血宝石
@@ -273,10 +280,10 @@ export class Stage {
     const cam = this.camera;
     cam.aspect = w / h;
     // 竖屏为主：保证机器的宽度永远塞得进屏幕，屏幕越窄相机拉得越远
-    const target = new THREE.Vector3(0, 3.78, 1.2);
+    const target = new THREE.Vector3(0, 3.55, 1.2);
     // 顶部状态栏和底部操作面板会盖住画面，机器必须完整落在两者之间（矮屏幕 / 横屏时由高度决定距离）
     const { top, bottom } = this.insets;
-    const halfW = 3.3, halfH = 5.2 / Math.max(0.4, (h - top - bottom) / h);
+    const halfW = 3.3, halfH = 5.05 / Math.max(0.4, (h - top - bottom) / h);
     const tanV = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
     const dist = Math.max(halfW / (tanV * cam.aspect), halfH / tanV);
     const dir = new THREE.Vector3(0, 0.3, 1).normalize();

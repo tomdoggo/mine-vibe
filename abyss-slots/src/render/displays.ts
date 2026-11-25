@@ -21,6 +21,11 @@ const FONT: Record<string, string[]> = {
   '9': ['.###.', '#...#', '#...#', '.####', '....#', '...#.', '.##..'],
   x: ['.....', '.....', '#...#', '.#.#.', '..#..', '.#.#.', '#...#'],
   '.': ['.....', '.....', '.....', '.....', '.....', '.##..', '.##..'],
+  E: ['#####', '#....', '#....', '####.', '#....', '#....', '#####'],
+  T: ['#####', '..#..', '..#..', '..#..', '..#..', '..#..', '..#..'],
+  W: ['#...#', '#...#', '#...#', '#.#.#', '#.#.#', '##.##', '#...#'],
+  I: ['.###.', '..#..', '..#..', '..#..', '..#..', '..#..', '.###.'],
+  N: ['#...#', '##..#', '#.#.#', '#.#.#', '#..##', '#...#', '#...#'],
   M: ['#...#', '##.##', '#.#.#', '#.#.#', '#...#', '#...#', '#...#'],
   B: ['####.', '#...#', '#...#', '####.', '#...#', '#...#', '####.'],
 };
@@ -87,6 +92,7 @@ export interface PayRow {
 }
 
 export interface Status {
+  /** 只用来判断下潜费付不付得起（余额本身显示在币盘前面的牌子上） */
   coins: number;
   spinsLeft: number;
   level: number;
@@ -101,9 +107,15 @@ export const DISPLAY_WIDTH = 4.6;
 
 export class Displays {
   readonly group = new THREE.Group();
-  /** 赔率表 264×76，状态栏 264×62，宽度都是 DISPLAY_WIDTH */
+  /** 赔率表 264×76，状态栏 264×40，宽度都是 DISPLAY_WIDTH */
   private pay = panel(264, 76, DISPLAY_WIDTH);
-  private status = panel(264, 62, DISPLAY_WIDTH);
+  private status = panel(264, 40, DISPLAY_WIDTH);
+  /** 滚轮窗口正下方：本次下注和上一转的奖金，停下后一直留着 */
+  private result = panel(232, 26, 3.6);
+  /** 币盘前沿的余额牌 */
+  private purse = panel(124, 28, 2.0);
+  private lastResult = '';
+  private lastPurse = -1;
   private icons = new Map<SymbolId, HTMLCanvasElement>();
   private lastPay = '';
   private lastStatus = '';
@@ -112,6 +124,16 @@ export class Displays {
     this.pay.mesh.position.y = this.statusHeight / 2 + 0.08 + this.payHeight / 2;
     this.group.add(this.status.mesh, this.pay.mesh);
     this.group.traverse((o) => o.layers.set(layer));
+    this.result.mesh.layers.set(layer);
+    this.purse.mesh.layers.set(layer);
+  }
+
+  get resultMesh() {
+    return this.result.mesh;
+  }
+
+  get purseMesh() {
+    return this.purse.mesh;
   }
 
   get payHeight() {
@@ -139,50 +161,71 @@ export class Displays {
     tex.needsUpdate = true;
   }
 
-  /**
-   * 状态栏两行：
-   *   金币            剩余转数
-   *   深渊层数 + 本层进度条    下潜费（付得起是金色，付不起是红色）
-   */
+  /** 状态栏一行：剩余转数 | 深渊层数 + 本层进度条 | 下潜费（付得起是金色，付不起是红色） */
   setStatus(s: Status) {
     const key = JSON.stringify(s);
     if (key === this.lastStatus) return;
     this.lastStatus = key;
     const { g, clear, tex } = this.status;
     clear();
-    // 第一行：金币
-    coinIcon(g, 14, 16);
-    drawText(g, compact(s.coins), 26, 9, 2, GOLD);
     // 剩余转数：沙漏
     g.fillStyle = BONE;
     for (let i = 0; i < 7; i++) {
       const half = 6 - Math.min(i, 5);
-      g.fillRect(196 - half, 9 + i, half * 2, 1);
-      g.fillRect(196 - half, 22 - i, half * 2, 1);
+      g.fillRect(14 - half, 13 + i, half * 2, 1);
+      g.fillRect(14 - half, 26 - i, half * 2, 1);
     }
-    drawText(g, String(s.spinsLeft), 208, 9, 2, BONE);
-    // 第二行：血宝石 + 层数 + 进度条
+    drawText(g, String(s.spinsLeft), 24, 13, 2, BONE);
+    // 血宝石 + 层数 + 进度条
     g.fillStyle = BLOOD;
     for (let dy = -7; dy <= 7; dy++) {
       const half = Math.max(0, 5 - Math.ceil(Math.abs(dy) * 0.7));
-      g.fillRect(14 - half, 46 + dy, half * 2 + 1, 1);
+      g.fillRect(76 - half, 20 + dy, half * 2 + 1, 1);
     }
-    drawText(g, String(s.level), 26, 39, 2, BLOOD);
-    const barX = 26 + String(s.level).length * 12 + 4;
+    drawText(g, String(s.level), 86, 13, 2, BLOOD);
+    const barX = 86 + String(s.level).length * 12 + 2;
     for (let i = 0; i < s.perLevel; i++) {
       g.fillStyle = i < s.progress ? BLOOD : '#3a1418';
-      g.fillRect(barX + i * 8, 40, 6, 12);
+      g.fillRect(barX + i * 7, 14, 5, 12);
     }
     // 下潜费：向下的箭头 + 金币数
     if (s.toll !== null) {
       const color = s.coins >= s.toll ? GOLD : BLOOD;
-      const x = barX + s.perLevel * 8 + 10;
+      const x = barX + s.perLevel * 7 + 6;
       g.fillStyle = color;
-      g.fillRect(x + 3, 39, 4, 7);
-      for (let i = 0; i < 6; i++) g.fillRect(x + i, 46 + i, 10 - i * 2, 1);
-      coinIcon(g, x + 22, 46);
-      drawText(g, compact(s.toll), x + 34, 39, 2, color);
+      g.fillRect(x + 3, 13, 4, 7);
+      for (let i = 0; i < 6; i++) g.fillRect(x + i, 20 + i, 10 - i * 2, 1);
+      coinIcon(g, x + 20, 20);
+      drawText(g, compact(s.toll), x + 30, 13, 2, color);
     }
+    tex.needsUpdate = true;
+  }
+
+  /** 下注额和上一转的奖金 */
+  setResult(bet: number, win: number) {
+    const key = `${bet}|${win}`;
+    if (key === this.lastResult) return;
+    this.lastResult = key;
+    const { g, clear, tex } = this.result;
+    clear();
+    drawText(g, 'BET', 8, 6, 2, '#a89f86');
+    drawText(g, compact(bet), 48, 6, 2, BONE);
+    drawText(g, 'WIN', 112, 6, 2, '#a89f86');
+    drawText(g, compact(win), 152, 6, 2, win > 0 ? GOLD : '#5a5148');
+    tex.needsUpdate = true;
+  }
+
+  /** 金币余额 */
+  setPurse(coins: number) {
+    if (coins === this.lastPurse) return;
+    this.lastPurse = coins;
+    const { g, clear, tex, w } = this.purse;
+    clear();
+    const text = compact(coins);
+    // 图标 + 数字整体居中
+    const x = Math.floor((w - (20 + text.length * 12)) / 2);
+    coinIcon(g, x + 8, 14);
+    drawText(g, text, x + 20, 7, 2, GOLD);
     tex.needsUpdate = true;
   }
 }
